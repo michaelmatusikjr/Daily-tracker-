@@ -5,36 +5,45 @@ import { toast, haptic, choose } from './ui.js';
 import { isRecurring, isTaskDone, habitTarget, habitVal, dayProgress } from './logic.js';
 import { todayKey } from './dates.js';
 
-function celebrateIfDone(k, before) {
+function celebrateIfDone(k, before, undo = null) {
   const after = dayProgress(getState(), k);
   if (before.pct < 1 && after.pct === 1 && after.total > 0) {
     ctx.anim.add('ring');
-    setTimeout(() => toast(k === todayKey() ? 'Everything done for today. Nice work! 🎉' : 'Everything done for that day 🎉'), 50);
+    const msg = k === todayKey() ? 'Everything done for today. Nice work! 🎉' : 'Everything done for that day 🎉';
+    setTimeout(() => toast(msg, undo ? { action: 'Undo', onAction: undo } : {}), 50);
     haptic([20, 40, 20]);
     return true;
   }
   return false;
 }
 
+/** Explicitly set a task occurrence's completion (used by toggle and by undo). */
+export function setTaskDone(id, k, value) {
+  update((s) => {
+    const x = s.tasks.find((y) => y.id === id);
+    if (!x) return;
+    if (isRecurring(x)) {
+      if (value) x.doneDates[k] = true; else delete x.doneDates[k];
+    } else {
+      x.done = !!value;
+    }
+  });
+}
+
 // ---------- Tasks ----------
-export function toggleTask(id, k, { silentToast = false } = {}) {
+export function toggleTask(id, k) {
   const st = getState();
   const t = st.tasks.find((x) => x.id === id);
   if (!t) return;
   const was = isTaskDone(t, k);
   const before = dayProgress(st, k);
   if (!was) ctx.anim.add('t-' + id);
-  update((s) => {
-    const x = s.tasks.find((y) => y.id === id);
-    if (isRecurring(x)) {
-      if (was) delete x.doneDates[k]; else x.doneDates[k] = true;
-    } else {
-      x.done = !was;
-    }
-  });
+  setTaskDone(id, k, !was);
   haptic(was ? 5 : 12);
-  if (!was && !celebrateIfDone(k, before) && !silentToast) {
-    toast(`Completed “${t.title}”`, { action: 'Undo', onAction: () => toggleTask(id, k, { silentToast: true }) });
+  if (was) return;
+  const undo = () => setTaskDone(id, k, was);
+  if (!celebrateIfDone(k, before, undo)) {
+    toast(`Completed “${t.title}”`, { action: 'Undo', onAction: undo });
   }
 }
 
@@ -79,6 +88,7 @@ export async function deleteTask(id, k) {
     ]);
     if (!choice) return false;
     if (choice === 'one') {
+      const wasDone = !!t.doneDates[k];
       update((s) => {
         const x = s.tasks.find((y) => y.id === id);
         if (!x.exceptions.includes(k)) x.exceptions.push(k);
@@ -88,7 +98,9 @@ export async function deleteTask(id, k) {
         action: 'Undo',
         onAction: () => update((s) => {
           const x = s.tasks.find((y) => y.id === id);
-          if (x) x.exceptions = x.exceptions.filter((d) => d !== k);
+          if (!x) return;
+          x.exceptions = x.exceptions.filter((d) => d !== k);
+          if (wasDone) x.doneDates[k] = true;
         }),
       });
       return true;
@@ -111,19 +123,24 @@ export function reorderTasks(ids) {
 }
 
 // ---------- Habits ----------
-export function setHabitValue(id, k, v) {
+export function setHabitValue(id, k, v, { silentUndo = false } = {}) {
+  if (k > todayKey()) return; // can't complete habits in the future
   const st = getState();
   const before = dayProgress(st, k);
   const h = st.habits.find((x) => x.id === id);
   if (!h) return;
-  const wasDone = habitVal(st, h, k) >= habitTarget(h);
+  const prev = habitVal(st, h, k);
+  const wasDone = prev >= habitTarget(h);
   const value = Math.max(0, Math.min(9999, v));
   update((s) => {
     s.logs[id] = s.logs[id] || {};
     if (value > 0) s.logs[id][k] = value; else delete s.logs[id][k];
   });
   const nowDone = value >= habitTarget(h);
-  if (nowDone && !wasDone) { ctx.anim.add('h-' + id); haptic(15); celebrateIfDone(k, before); }
+  if (nowDone && !wasDone) {
+    ctx.anim.add('h-' + id); haptic(15);
+    if (!silentUndo) celebrateIfDone(k, before, () => setHabitValue(id, k, prev, { silentUndo: true }));
+  }
   else haptic(6);
 }
 

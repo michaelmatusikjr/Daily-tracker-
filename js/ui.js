@@ -128,7 +128,9 @@ export function openSheet({ title, content, footer = null, onClose, cls = '' }) 
     h('div.sheet-head', h('h2.sheet-title', { id: titleId }, title), closeBtn),
     h('div.sheet-body', content),
     footer ? h('div.sheet-foot', footer) : null);
-  const backdrop = h('div.sheet-backdrop', { onclick: () => close() });
+  const openedAt = Date.now();
+  // Ignore backdrop clicks right after opening (e.g. a double-tap on the button that opened it).
+  const backdrop = h('div.sheet-backdrop', { onclick: () => { if (Date.now() - openedAt > 350) close(); } });
   const root = h('div.sheet-root', backdrop, panel);
   document.body.append(root);
   document.body.classList.add('sheet-open');
@@ -189,6 +191,7 @@ export function openSheet({ title, content, footer = null, onClose, cls = '' }) 
 }
 
 export const closeAllSheets = () => [...openSheets].forEach((s) => s.close());
+export const isSheetOpen = () => openSheets.length > 0;
 
 /** Choice dialog. options: [{value,label,style:'primary'|'danger'|'ghost'}]. Resolves value or null. */
 export function choose(title, message, options) {
@@ -244,7 +247,10 @@ export function onPress(el, { tap, long, delay = 480 }) {
 export function onSwipe(el, { left, right, threshold = 60 }) {
   let sx = null, sy = 0, st = 0;
   el.addEventListener('touchstart', (e) => {
-    if (e.touches.length !== 1 || e.target.closest('.no-swipe, input, textarea, select, .drag-handle')) { sx = null; return; }
+    // Ignore gestures that start inside form fields, drag handles, or a nested
+    // .no-swipe region that has its own swipe handling (but not `el` itself).
+    const blocker = e.target.closest('.no-swipe, input, textarea, select, .drag-handle');
+    if (e.touches.length !== 1 || (blocker && blocker !== el)) { sx = null; return; }
     sx = e.touches[0].clientX; sy = e.touches[0].clientY; st = Date.now();
   }, { passive: true });
   el.addEventListener('touchend', (e) => {

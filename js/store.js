@@ -1,9 +1,10 @@
 // Persistent app state in localStorage with a versioned schema + migrations.
 import { todayKey, isValidKey } from './dates.js';
 
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.0.1';
 export const SCHEMA_VERSION = 1;
 const STORAGE_KEY = 'dailyTracker:data';
+const ACCENT_IDS = ['indigo', 'teal', 'rose', 'amber', 'green', 'blue'];
 
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
@@ -85,14 +86,17 @@ function normHabit(hb, i) {
   if (!isObj(hb) || !str(hb.name).trim()) return null;
   const sc = isObj(hb.schedule) ? hb.schedule : {};
   const goal = isObj(hb.goal) ? hb.goal : {};
+  const days = Array.isArray(sc.days) ? [...new Set(sc.days.filter((d) => Number.isInteger(d) && d >= 0 && d < 7))] : [];
+  let type = ['daily', 'days', 'perWeek'].includes(sc.type) ? sc.type : 'daily';
+  if (type === 'days' && !days.length) type = 'daily';
   return {
     id: str(hb.id, 40) || uid(),
     name: str(hb.name, 100).trim(),
     emoji: str(hb.emoji, 16) || '✅',
     color: /^#[0-9a-f]{6}$/i.test(hb.color) ? hb.color : '#6366f1',
     schedule: {
-      type: ['daily', 'days', 'perWeek'].includes(sc.type) ? sc.type : 'daily',
-      days: Array.isArray(sc.days) ? sc.days.filter((d) => Number.isInteger(d) && d >= 0 && d < 7) : [1, 2, 3, 4, 5],
+      type,
+      days: days.length ? days : [1, 2, 3, 4, 5],
       times: Number.isInteger(sc.times) && sc.times > 0 && sc.times < 7 ? sc.times : 3,
     },
     goal: {
@@ -108,12 +112,25 @@ function normHabit(hb, i) {
   };
 }
 
+/** Give duplicated ids a fresh id (later duplicates lose any id-keyed history). */
+function dedupeIds(list) {
+  const seen = new Set();
+  for (const item of list) {
+    while (seen.has(item.id)) item.id = uid();
+    seen.add(item.id);
+  }
+  return list;
+}
+
 /** Fill defaults and drop malformed entries so the rest of the app can trust the shape. */
 export function normalize(data) {
   const def = defaultState();
   const out = { ...def, version: SCHEMA_VERSION };
   out.settings = { ...def.settings, ...(isObj(data.settings) ? data.settings : {}) };
   if (!['system', 'light', 'dark'].includes(out.settings.theme)) out.settings.theme = 'system';
+  if (!ACCENT_IDS.includes(out.settings.accent)) out.settings.accent = 'indigo';
+  out.settings.notifications = !!out.settings.notifications;
+  out.settings.onboarded = !!out.settings.onboarded;
   if (![0, 1].includes(out.settings.weekStart)) out.settings.weekStart = 1;
   if (!['12', '24'].includes(out.settings.timeFormat)) out.settings.timeFormat = def.settings.timeFormat;
   out.categories = Array.isArray(data.categories)
@@ -121,8 +138,9 @@ export function normalize(data) {
         id: str(c.id, 40) || uid(), name: str(c.name, 40).trim(), color: /^#[0-9a-f]{6}$/i.test(c.color) ? c.color : '#64748b',
       }))
     : def.categories;
-  out.tasks = (Array.isArray(data.tasks) ? data.tasks : []).map(normTask).filter(Boolean);
-  out.habits = (Array.isArray(data.habits) ? data.habits : []).map(normHabit).filter(Boolean);
+  out.categories = dedupeIds(out.categories);
+  out.tasks = dedupeIds((Array.isArray(data.tasks) ? data.tasks : []).map(normTask).filter(Boolean));
+  out.habits = dedupeIds((Array.isArray(data.habits) ? data.habits : []).map(normHabit).filter(Boolean));
   out.logs = {};
   if (isObj(data.logs)) {
     for (const [hid, days] of Object.entries(data.logs)) {
@@ -173,20 +191,44 @@ export function exportPayload() {
 // ---- runtime store ----
 let state = defaultState();
 let storageOk = true;
+// If saved data can't be read we keep a backup and block saving until the user decides,
+// so a bug or corrupted value never silently overwrites their data.
+let loadFailure = null; // { raw, backupKey, error }
 const listeners = new Set();
 
 export function load() {
+  let raw = null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    raw = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    storageOk = false;
+    state = defaultState();
+    return state;
+  }
+  try {
     state = raw ? migrate(JSON.parse(raw)) : defaultState();
   } catch (e) {
-    console.warn('Could not load saved data, starting fresh.', e);
+    console.warn('Could not read saved data; keeping a backup and pausing saves.', e);
+    const backupKey = `${STORAGE_KEY}:backup-${Date.now()}`;
+    try { localStorage.setItem(backupKey, raw); } catch { /* storage full: raw is still kept in memory */ }
+    loadFailure = { raw, backupKey, error: String(e?.message || e) };
     state = defaultState();
+    state.settings.onboarded = true;
   }
   return state;
 }
 
+export const getLoadFailure = () => loadFailure;
+
+/** User chose to start fresh: allow saving again (the backup key stays in storage). */
+export function resolveLoadFailure() {
+  loadFailure = null;
+  save();
+  listeners.forEach((l) => l(state));
+}
+
 export function save() {
+  if (loadFailure) return false;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     storageOk = true;
@@ -207,6 +249,7 @@ export function update(fn, { silent = false } = {}) {
 }
 
 export function replaceState(next) {
+  loadFailure = null; // an explicit import/reset is the user's decision
   state = next;
   save();
   listeners.forEach((l) => l(state));

@@ -1,7 +1,7 @@
 // App bootstrap: routing, rendering, timers, PWA wiring.
-import { load, subscribe, getState } from './store.js';
+import { load, subscribe, getState, getLoadFailure, resolveLoadFailure } from './store.js';
 import { ctx } from './ctx.js';
-import { h, closeAllSheets } from './ui.js';
+import { h, closeAllSheets, isSheetOpen, confirmDialog, toast } from './ui.js';
 import { icon } from './icons.js';
 import { applyTheme } from './theme.js';
 import { todayKey, monthStart } from './dates.js';
@@ -38,7 +38,11 @@ function parseRoute() {
 function buildNav() {
   nav.replaceChildren(
     h('div.nav-brand', h('span.brand-mark', { 'aria-hidden': 'true' }, icon('check', { size: 16 })), h('span', 'Daily Tracker')),
-    ...TABS.map((t) => h('a.nav-item', { href: '#' + t.id, dataset: { tab: t.id } },
+    ...TABS.map((t) => h('a.nav-item', {
+      href: '#' + t.id, dataset: { tab: t.id },
+      // Tapping the Today tab always means "today" (calendar day taps set a date explicitly).
+      onclick: t.id === 'today' ? () => { ctx.ui.date = todayKey(); if (parseRoute().name === 'today') render(); } : null,
+    },
       h('span.nav-icon', icon(t.icon, { size: 22 })), h('span.nav-label', t.label))));
 }
 
@@ -58,6 +62,8 @@ function render() {
     default: view = renderToday();
   }
   if (changedRoute) view.classList.add('enter');
+  const failure = getLoadFailure();
+  if (failure) view.prepend(loadFailureCard(failure));
   main.replaceChildren(view);
   ctx.anim.clear();
   const activeTab = name === 'habit' ? 'habits' : name;
@@ -76,7 +82,38 @@ function render() {
   lastRoute = routeKey;
 }
 
+function loadFailureCard(failure) {
+  const exportRaw = () => {
+    const url = URL.createObjectURL(new Blob([failure.raw ?? ''], { type: 'application/json' }));
+    const a = h('a', { href: url, download: `daily-tracker-unreadable-data-${todayKey()}.json` });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  };
+  const reset = async () => {
+    if (!(await confirmDialog('Start fresh?', 'The unreadable data stays stored as a backup on this device, but the app will start empty and save new changes.', { ok: 'Start fresh', danger: true }))) return;
+    resolveLoadFailure();
+    toast('Started fresh. Your old data is still kept as a backup.');
+  };
+  return h('section.card.warn-card.load-fail', { role: 'alert' },
+    h('div',
+      h('p.load-fail-title', 'We couldn’t read your saved data'),
+      h('p.set-desc', 'Nothing has been overwritten: a backup is stored on this device. Changes are not saved until you choose what to do.'),
+      h('div.set-actions',
+        h('button.btn.secondary.small', { type: 'button', onclick: exportRaw }, icon('download', { size: 16 }), 'Export raw data'),
+        h('button.btn.danger-ghost.small', { type: 'button', onclick: reset }, icon('refresh', { size: 16 }), 'Reset'))));
+}
+
+function rollover() {
+  const t = todayKey();
+  if (t === lastToday) return false;
+  if (ctx.ui.date === lastToday) ctx.ui.date = t;
+  if (ctx.ui.calMonth === monthStart(lastToday)) ctx.ui.calMonth = monthStart(t);
+  lastToday = t;
+  return true;
+}
+
 const fab = h('button.fab', { type: 'button', 'aria-label': 'Quick add', onclick: () => {
+  if (isSheetOpen()) return; // ignore double-taps while a sheet is open
   const { name } = parseRoute();
   if (name === 'habits' || name === 'habit') openHabitForm(null); else openQuickAdd();
 } }, icon('plus', { size: 28 }));
@@ -105,26 +142,19 @@ function init() {
   window.addEventListener('hashchange', () => { closeAllSheets(); render(); });
   // Keyboard shortcut: "n" opens quick add.
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !e.altKey && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName) && !document.body.classList.contains('sheet-open') && !document.querySelector('.onboarding')) {
+    if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !e.altKey && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName) && !isSheetOpen() && !document.querySelector('.onboarding')) {
       e.preventDefault();
       fab.click();
     }
   });
   // Keep "now" line fresh and roll over at midnight.
   setInterval(() => {
-    const t = todayKey();
-    if (t !== lastToday) {
-      if (ctx.ui.date === lastToday) ctx.ui.date = t;
-      if (ctx.ui.calMonth === monthStart(lastToday)) ctx.ui.calMonth = monthStart(t);
-      lastToday = t;
-      reschedule();
-    }
+    if (rollover()) reschedule();
     if (parseRoute().name === 'today' && !document.body.classList.contains('sheet-open') && !document.activeElement?.matches?.('textarea, input')) render();
   }, 60000);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
-    const t = todayKey();
-    if (t !== lastToday) { if (ctx.ui.date === lastToday) ctx.ui.date = t; lastToday = t; }
+    rollover();
     if (!document.body.classList.contains('sheet-open')) render();
     reschedule();
   });

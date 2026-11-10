@@ -4,8 +4,8 @@ import { icon } from '../icons.js';
 import { getState } from '../store.js';
 import { ctx } from '../ctx.js';
 import { bumpHabit, toggleHabitDay, toggleTask } from '../actions.js';
-import { habitVal, habitTarget, isScheduled, habitStart, isTaskDone, isRecurring, PRIORITIES, weekCount } from '../logic.js';
-import { addDays, fmtTime, fmtDuration, weekdayNarrow, fmtDateShort, todayKey, timeToMin, minToTime } from '../dates.js';
+import { habitVal, habitTarget, isScheduled, habitStart, isTaskDone, isRecurring, PRIORITIES, weekCount, recurrenceLabel } from '../logic.js';
+import { addDays, fmtTime, fmtDuration, weekdayNarrow, weekdayLabels, fmtDateShort, todayKey, timeToMin, minToTime } from '../dates.js';
 import { openTaskForm } from '../forms.js';
 
 /** One-tap habit control: check button, or count button (tap +1, long-press/right-click −1). */
@@ -16,17 +16,24 @@ export function habitControl(hb, k, { big = false } = {}) {
   const done = v >= target;
   const anim = ctx.anim.has('h-' + hb.id);
   const style = { '--c': hb.color };
+  const future = k > todayKey();
   if (hb.goal.type !== 'count') {
     return h(`button.habit-check${done ? '.done' : ''}${anim ? '.pop' : ''}${big ? '.big' : ''}`, {
-      type: 'button', style, 'aria-pressed': String(done), 'data-fk': 'hc-' + hb.id,
-      'aria-label': done ? `${hb.name}: done. Tap to undo` : `Mark ${hb.name} done`,
+      type: 'button', style, 'aria-pressed': String(done), 'data-fk': 'hc-' + hb.id, disabled: future,
+      title: future ? 'You can check this off on the day' : null,
+      'aria-label': future ? `${hb.name}: upcoming` : done ? `${hb.name}: done. Tap to undo` : `Mark ${hb.name} done`,
       onclick: () => bumpHabit(hb.id, k, 1),
     }, icon('check', { size: big ? 28 : 22 }));
   }
   const size = big ? 72 : 46;
   const btn = h(`button.habit-count${done ? '.done' : ''}${anim ? '.pop' : ''}${big ? '.big' : ''}`, {
-    type: 'button', style, 'data-fk': 'hc-' + hb.id,
-    'aria-label': `${hb.name}: ${v} of ${target}${hb.goal.unit ? ' ' + hb.goal.unit : ''}. Tap to add one, long-press to remove one.`,
+    type: 'button', style, 'data-fk': 'hc-' + hb.id, disabled: future,
+    title: future ? 'You can log this on the day' : null,
+    'aria-label': future ? `${hb.name}: upcoming, target ${target}` : `${hb.name}: ${v} of ${target}${hb.goal.unit ? ' ' + hb.goal.unit : ''}. Tap or press Up to add one; long-press, Down or minus to remove one.`,
+    onkeydown: (e) => {
+      if (['ArrowDown', '-', 'Subtract'].includes(e.key)) { e.preventDefault(); bumpHabit(hb.id, k, -1); }
+      else if (['ArrowUp', '+', '=', 'Add'].includes(e.key)) { e.preventDefault(); bumpHabit(hb.id, k, 1); }
+    },
   },
   ring(v / target, { size, stroke: big ? 7 : 4, color: hb.color }),
   h('span.count-label', done ? icon('check', { size: big ? 26 : 18 }) : h('span', h('b', String(v)), h('small', `/${target}`))));
@@ -77,8 +84,9 @@ export function taskRow(t, k, { draggable = false, showDate = false, nowMin = nu
     // time shown in the rail; show duration only
     if (t.duration) meta.push(h('span.meta', icon('clock', { size: 13 }), fmtDuration(t.duration)));
   } else if (t.time) meta.push(h('span.meta', icon('clock', { size: 13 }), fmtTime(t.time, fmt)));
+  else if (t.duration) meta.push(h('span.meta', { title: 'Estimated duration' }, icon('clock', { size: 13 }), fmtDuration(t.duration)));
   if (cat) meta.push(h('span.cat', { style: { '--c': cat.color } }, cat.name));
-  if (isRecurring(t)) meta.push(h('span.meta', { title: 'Repeats' }, icon('repeat', { size: 13 }), h('span.sr-only', 'Repeats')));
+  if (isRecurring(t)) meta.push(h('span.meta', { title: 'Repeats' }, icon('repeat', { size: 13 }), recurrenceLabel(t, weekdayLabels('short'))));
   if (t.reminder !== null && t.time) meta.push(h('span.meta', { title: 'Reminder set' }, icon('bell', { size: 13 }), h('span.sr-only', 'Reminder set')));
   if (t.notes) meta.push(h('span.meta', { title: 'Has notes' }, icon('note', { size: 13 }), h('span.sr-only', 'Has notes')));
 

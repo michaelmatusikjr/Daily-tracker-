@@ -1,13 +1,14 @@
 // First-run welcome tour: swipeable cards (scroll-snap), skippable.
 import { h } from './ui.js';
 import { icon } from './icons.js';
-import { update } from './store.js';
+import { update, getState } from './store.js';
 import { seedExamples } from './actions.js';
 
 export function showOnboarding() {
   if (document.querySelector('.onboarding')) return;
   const prevFocus = document.activeElement;
-  let seed = true;
+  // On a replay of the tour, don't add examples again unless asked.
+  let seed = !getState().settings.onboarded;
   const slides = [
     { art: '🗓️', title: 'Plan your day in seconds', text: 'Tap + and just type. “Gym 6pm” or “Call mom tomorrow 14:30” lands at the right time automatically.' },
     { art: '🔥', title: 'Build habits that stick', text: 'One tap to check off. Count goals like 8 glasses of water. Streaks respect your schedule, so rest days never break them.' },
@@ -21,7 +22,7 @@ export function showOnboarding() {
       h('h2.ob-title', sl.title),
       h('p.ob-text', sl.text),
       sl.last ? h('label.ob-check',
-        h('input', { type: 'checkbox', checked: true, onchange: (e) => { seed = e.target.checked; } }),
+        h('input', { type: 'checkbox', checked: seed, onchange: (e) => { seed = e.target.checked; } }),
         h('span', 'Add a few example habits to start')) : null));
     dots.append(h('button.ob-dot', { type: 'button', role: 'tab', 'aria-label': `Go to step ${i + 1}`, onclick: () => goTo(i) }));
   });
@@ -44,12 +45,24 @@ export function showOnboarding() {
   }
   track.addEventListener('scroll', () => requestAnimationFrame(sync), { passive: true });
   function onKey(e) {
+    if (e.key === 'Tab') {
+      const f = [...root.querySelectorAll('button, input')].filter((x) => x.offsetParent !== null);
+      const first = f[0], last = f[f.length - 1];
+      if (!root.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      return;
+    }
     if (e.key === 'Escape') finish(false);
     if (e.key === 'ArrowRight') goTo(Math.min(slides.length - 1, current() + 1));
     if (e.key === 'ArrowLeft') goTo(Math.max(0, current() - 1));
   }
   document.addEventListener('keydown', onKey);
+  // Make everything behind the dialog inert so focus stays inside it.
+  const behind = [...document.querySelectorAll('body > .app, body > .fab, body > .skip-link, body > #toasts')];
+  behind.forEach((el) => el.setAttribute('inert', ''));
   function finish(completed) {
+    behind.forEach((el) => el.removeAttribute('inert'));
     document.removeEventListener('keydown', onKey);
     root.classList.remove('show');
     setTimeout(() => root.remove(), 250);

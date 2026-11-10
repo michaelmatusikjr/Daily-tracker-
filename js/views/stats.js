@@ -43,7 +43,7 @@ export function renderStats() {
   const avg = withData.length ? withData.reduce((a, d) => a + d.pct, 0) / withData.length : null;
   root.append(h('section.card.chart-card',
     h('div.section-head',
-      h('div', h('h2.section-title', 'Daily completion'), h('p.muted.small', avg === null ? 'No data yet' : `Average ${pctStr(avg)} over ${range} days`)),
+      h('div', h('h2.section-title', 'Daily completion'), h('p.muted.small', avg === null ? 'No data yet' : `Average ${pctStr(avg)} over ${withData.length} day${withData.length === 1 ? '' : 's'} with items (last ${range} days)`)),
       segmented([{ value: 7, label: '7 days' }, { value: 30, label: '30 days' }], range, (v) => { ctx.ui.statsRange = v; ctx.rerender(); }, { label: 'Range', small: true })),
     barChart(days, range),
     h('table.sr-only', h('caption', 'Daily completion'),
@@ -77,7 +77,7 @@ export function renderStats() {
   }
   const order = Array.from({ length: 7 }, (_, i) => (st.settings.weekStart + i) % 7);
   const vals = order.map((d) => ({ d, v: byDow[d].n ? byDow[d].sum / byDow[d].n : null }));
-  const best = vals.filter((x) => x.v !== null).sort((a, b) => b.v - a.v)[0];
+  const best = vals.filter((x) => x.v !== null && x.v > 0).sort((a, b) => b.v - a.v)[0];
   const names = weekdayLabels('long');
   const short = weekdayLabels('short');
   root.append(h('section.card',

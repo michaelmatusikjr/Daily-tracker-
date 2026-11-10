@@ -12,6 +12,19 @@ export const HABIT_COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f9731
 const CATEGORY_COLORS = ['#3b82f6', '#10b981', '#f43f5e', '#f59e0b', '#8b5cf6', '#14b8a6', '#ec4899', '#64748b'];
 export const EMOJIS = ['✅', '💧', '🏃', '🧘', '📚', '✍️', '🥗', '🍎', '😴', '🛏️', '🦷', '💊', '🧠', '🎯', '💪', '🚶', '🚴', '🏊', '🎸', '🎨', '🧹', '🌱', '☀️', '🌙', '📵', '💰', '🙏', '❤️', '📝', '🗣️', '☕', '🚭'];
 
+/** First user-perceived character (keeps ZWJ emoji like 👩‍💻 intact). */
+function firstGrapheme(str) {
+  if (!str) return '';
+  try {
+    if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+      const first = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(str)[Symbol.iterator]().next().value;
+      return first ? first.segment : '';
+    }
+  } catch { /* fall through */ }
+  const m = str.match(/^(?:\p{RI}\p{RI}|\p{Extended_Pictographic}(?:\uFE0F|\p{EMod})?(?:\u200D\p{Extended_Pictographic}(?:\uFE0F|\p{EMod})?)*|.)/su);
+  return m ? m[0] : [...str][0];
+}
+
 function field(label, control, hint = null, id = null) {
   const fid = id || 'f-' + Math.random().toString(36).slice(2, 8);
   if (control instanceof HTMLElement && /^(INPUT|SELECT|TEXTAREA)$/.test(control.tagName)) control.id = fid;
@@ -73,6 +86,10 @@ function swatches(colors, value, onChange, label) {
   return wrap;
 }
 
+export function findCategory(name) {
+  return getState().categories.find((c) => c.name.toLowerCase() === name.toLowerCase())?.id || null;
+}
+
 /** Find a category by name (case-insensitive) or create it. Returns id. */
 export function ensureCategory(name) {
   const st = getState();
@@ -121,7 +138,7 @@ export function openQuickAdd() {
     }
     const p = parsed();
     const data = {
-      title: p.title.slice(0, 200), date: p.date, time: p.time, duration: p.time ? p.duration : null,
+      title: p.title.slice(0, 200), date: p.date, time: p.time, duration: p.duration,
       priority: p.priority, category: p.tag ? ensureCategory(p.tag) : null,
     };
     saveTask(data);
@@ -141,7 +158,10 @@ export function openQuickAdd() {
         onclick: () => {
           const p = parsed();
           sheet.close();
-          openTaskForm(null, { title: input.value.trim() ? p.title : '', date: p.date, time: p.time, duration: p.time ? p.duration : null, priority: p.priority, category: p.tag ? ensureCategory(p.tag) : null });
+          openTaskForm(null, {
+            title: input.value.trim() ? p.title : '', date: p.date, time: p.time, duration: p.duration, priority: p.priority,
+            category: p.tag ? findCategory(p.tag) : null, newCategory: p.tag && !findCategory(p.tag) ? p.tag : null,
+          });
         },
       }, 'More options'),
       h('button.btn.primary', { type: 'submit' }, icon('plus', { size: 18 }), 'Add task')));
@@ -163,6 +183,10 @@ export function openTaskForm(task, defaults = {}) {
     reminder: null, recur: { type: 'none', days: [], interval: 2 }, ...defaults,
   };
   if (!d.recur) d.recur = { type: 'none', days: [], interval: 2 };
+  // A #tag typed in quick add becomes a category only if the task is actually saved.
+  const pendingCat = d.newCategory ? d.newCategory.charAt(0).toUpperCase() + d.newCategory.slice(1, 40) : null;
+  delete d.newCategory;
+  if (pendingCat) d.category = '__new';
 
   const title = h('input.input', { type: 'text', value: d.title, placeholder: 'What do you need to do?', maxlength: 200, autofocus: isNew && !d.title, required: true, autocomplete: 'off' });
   const notes = h('textarea.input', { rows: 2, placeholder: 'Notes (optional)', maxlength: 2000 }, d.notes || '');
@@ -172,10 +196,11 @@ export function openTaskForm(task, defaults = {}) {
   const duration = select([['', 'No duration'], [15, '15 min'], [30, '30 min'], [45, '45 min'], [60, '1 hour'], [90, '1.5 hours'], [120, '2 hours'], [180, '3 hours'], [240, '4 hours']], d.duration || '');
   if (d.duration && ![15, 30, 45, 60, 90, 120, 180, 240].includes(d.duration)) duration.append(h('option', { value: String(d.duration), selected: true }, fmtDuration(d.duration)));
   const reminder = select([['', 'No reminder'], [0, 'At start time'], [5, '5 min before'], [10, '10 min before'], [15, '15 min before'], [30, '30 min before'], [60, '1 hour before']], d.reminder ?? '');
-  const timeExtras = h('div.grid-2', field('Duration', duration), field('Reminder', reminder));
+  const reminderField = field('Reminder', reminder);
+  const timeExtras = h('div.grid-2', field('Duration', duration), reminderField);
   function syncTime() {
     const has = !!time.value;
-    timeExtras.hidden = !has;
+    reminderField.hidden = !has;
     clearTime.hidden = !has;
   }
   time.addEventListener('input', syncTime);
@@ -194,6 +219,7 @@ export function openTaskForm(task, defaults = {}) {
       onclick: () => { category = id; renderCats(); },
     }, color ? h('span.dot', { style: { background: color } }) : null, name);
     catWrap.replaceChildren(mk(null, 'None', null), ...cats.map((c) => mk(c.id, c.name, c.color)),
+      pendingCat ? mk('__new', pendingCat + ' (new)', 'var(--accent)') : null,
       h('button.chip.add', { type: 'button', onclick: addCat, 'aria-label': 'New category' }, icon('plus', { size: 14 }), 'New'));
   }
   function addCat() {
@@ -218,8 +244,15 @@ export function openTaskForm(task, defaults = {}) {
 
   // Recurrence
   const recur = { ...d.recur, days: d.recur.days?.length ? [...d.recur.days] : [dow(d.date)] };
+  let daysTouched = !isNew;
+  const makeDayChips = () => dayChips(recur.days, (v) => { recur.days = v; daysTouched = true; });
+  date.addEventListener('change', () => {
+    if (daysTouched || !isValidKey(date.value)) return;
+    recur.days = [dow(date.value)];
+    daysRow.replaceChildren(makeDayChips());
+  });
   const recurSel = select([['none', 'Does not repeat'], ['daily', 'Every day'], ['weekdays', 'Every weekday (Mon–Fri)'], ['weekly', 'Weekly on…'], ['monthly', 'Monthly (same date)'], ['interval', 'Every N days']], recur.type);
-  const daysRow = h('div.recur-extra', dayChips(recur.days, (v) => { recur.days = v; }));
+  const daysRow = h('div.recur-extra', makeDayChips());
   const intervalInput = h('input.input.narrow', { type: 'number', min: 2, max: 365, value: recur.interval || 2, inputmode: 'numeric', 'aria-label': 'Repeat every N days' });
   const intervalRow = h('div.recur-extra.inline', h('span', 'Every'), intervalInput, h('span', 'days'));
   const syncRecur = () => {
@@ -251,9 +284,9 @@ export function openTaskForm(task, defaults = {}) {
     const data = {
       title: t, notes: notes.value.trim(), date: date.value,
       time: hasTime ? time.value : null,
-      duration: hasTime && duration.value ? Number(duration.value) : null,
+      duration: duration.value ? Number(duration.value) : null,
       reminder: hasTime && reminder.value !== '' ? Number(reminder.value) : null,
-      priority, category,
+      priority, category: category === '__new' ? (pendingCat ? ensureCategory(pendingCat) : null) : category,
       recur: { type: recur.type, days: recur.days, interval: Math.max(2, Math.min(365, parseInt(intervalInput.value, 10) || 2)) },
     };
     if (!isNew) data.id = task.id;
@@ -295,7 +328,7 @@ export function openHabitForm(habit) {
     }, e)));
   }
   custom.addEventListener('input', () => {
-    const v = [...custom.value.trim()].slice(0, 2).join('');
+    const v = firstGrapheme(custom.value.trim());
     if (v) { d.emoji = v; preview.textContent = v; renderEmojis(); }
   });
   renderEmojis();

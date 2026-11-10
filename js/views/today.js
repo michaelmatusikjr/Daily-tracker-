@@ -5,7 +5,7 @@ import { ctx } from '../ctx.js';
 import { dayProgress, tasksOn, splitTasks, overdueTasks, activeHabits, isDueOn, habitStart, streaks, habitVal, habitTarget, MOODS, weekCount } from '../logic.js';
 import { addDays, todayKey, startOfWeek, fromKey, fmtDateLong, fmtDateShort, greeting, relativeLabel, nowMin, timeToMin, fmtTime, weekdayNarrow, weekdayLabels } from '../dates.js';
 import { taskRow, habitControl, streakBadge, timeRange } from './widgets.js';
-import { moveToToday, reorderTasks, setMood, setNote } from '../actions.js';
+import { moveToToday, reorderTasks, setMood, setNote, bumpHabit } from '../actions.js';
 import { openQuickAdd } from '../forms.js';
 
 const TOD_ORDER = { morning: 0, afternoon: 1, evening: 2, anytime: 3 };
@@ -102,7 +102,8 @@ export function renderToday() {
       list.append(h('li.habit-row', { style: { '--c': hb.color } },
         h('button.habit-row-main', { type: 'button', onclick: () => ctx.go('habit/' + hb.id), 'aria-label': `${hb.name} details` },
           h('span.emoji-bubble', { 'aria-hidden': 'true' }, hb.emoji),
-          h('span.habit-row-text', h('span.habit-name', hb.name), sub.length || s.current ? h('span.habit-sub', streakBadge(s), sub.join(' · ')) : null)),
+          h('span.habit-row-text', h('span.habit-name', hb.name), sub.length || s.current ? h('span.habit-sub', streakBadge(s), h('span.sub-text', sub.join(' · '))) : null)),
+        hb.goal.type === 'count' && v > 0 && k <= today ? iconBtn('minus', `Remove one from ${hb.name}`, () => bumpHabit(hb.id, k, -1), 'minus-btn') : null,
         habitControl(hb, k)));
     }
     root.append(h('section.section', sectionHead('Habits', h('a.link-btn', { href: '#habits' }, 'All habits'), 'habits'), list));
@@ -146,6 +147,11 @@ export function renderToday() {
   return root;
 }
 
+function journalSubtitle(entry) {
+  if (entry.mood) return `Feeling ${MOODS[entry.mood - 1].label.toLowerCase()}` + (entry.note ? ' · note saved' : '');
+  return entry.note ? 'Note saved' : 'How was your day?';
+}
+
 function journalCard(k) {
   const st = getState();
   const entry = st.journal[k] || { mood: null, note: '' };
@@ -158,7 +164,7 @@ function journalCard(k) {
     onclick: () => { ctx.ui.journalOpen = !open; ctx.rerender(); },
   },
   h('span.journal-icon', { 'aria-hidden': 'true' }, moodEmoji || icon('book', { size: 18 })),
-  h('span.journal-title', h('b', 'Journal'), h('small', entry.mood ? `Feeling ${MOODS[entry.mood - 1].label.toLowerCase()}` + (entry.note ? ' · note saved' : '') : entry.note ? 'Note saved' : 'How was your day?')),
+  h('span.journal-title', h('b', 'Journal'), h('small.journal-sub', journalSubtitle(entry))),
   h('span.chev', icon('chevronDown', { size: 18 })));
   const card = h(`section.card.journal${open ? '.open' : ''}`, head);
   if (open) {
@@ -168,15 +174,21 @@ function journalCard(k) {
         onclick: () => setMood(k, m.v),
       }, h('span.mood-e', m.e), h('span.mood-l', m.label))));
     let timer;
+    // setNote is silent (no re-render, keeps focus), so refresh the subtitle by hand.
+    const save = () => {
+      setNote(k, ta.value);
+      status.textContent = 'Saved';
+      head.querySelector('.journal-sub').textContent = journalSubtitle(getState().journal[k] || { mood: null, note: '' });
+    };
     const status = h('span.save-status', { 'aria-live': 'polite' });
     const ta = h('textarea.input.journal-note', {
       rows: 3, maxlength: 1000, placeholder: 'A few words about today…', 'aria-label': 'Journal note',
       oninput: () => {
         clearTimeout(timer);
         status.textContent = '';
-        timer = setTimeout(() => { setNote(k, ta.value); status.textContent = 'Saved'; }, 400);
+        timer = setTimeout(save, 400);
       },
-      onblur: () => { clearTimeout(timer); setNote(k, ta.value); },
+      onblur: () => { clearTimeout(timer); save(); },
     }, entry.note || '');
     card.append(h('div.journal-body', { id: bodyId }, moods, ta, status));
   }

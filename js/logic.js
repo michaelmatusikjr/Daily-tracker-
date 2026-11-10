@@ -1,5 +1,5 @@
 // Pure domain logic: recurrence, completion, streaks, stats.
-import { addDays, diffDays, dow, daysInMonth, isoWeekStart, todayKey, timeToMin } from './dates.js';
+import { addDays, diffDays, dow, daysInMonth, startOfWeek, todayKey, timeToMin } from './dates.js';
 
 // ---------- Tasks ----------
 export const isRecurring = (t) => (t.recur?.type || 'none') !== 'none';
@@ -77,8 +77,11 @@ export function isScheduled(h, k) {
   return true;
 }
 
+/** Habit weeks follow the user's "week starts on" setting. */
+export const habitWeekStart = (state, k) => startOfWeek(k, state.settings?.weekStart ?? 1);
+
 export function weekCount(state, h, k) {
-  const ws = isoWeekStart(k);
+  const ws = habitWeekStart(state, k);
   let c = 0;
   for (let i = 0; i < 7; i++) if (habitDone(state, h, addDays(ws, i))) c++;
   return c;
@@ -103,16 +106,16 @@ export function isDueOn(state, h, k) {
 /**
  * Streaks respect schedules: days the habit isn't scheduled never break a streak,
  * and today (still in progress) never breaks it either. perWeek habits count
- * consecutive ISO weeks where the weekly target was met.
+ * consecutive weeks (per the week-start setting) where the weekly target was met.
  */
 export function streaks(state, h, today = todayKey()) {
   const start = habitStart(state, h);
   if (start > today) return { current: 0, best: 0, unit: h.schedule?.type === 'perWeek' ? 'week' : 'day' };
   if (h.schedule?.type === 'perWeek') {
     const times = h.schedule.times || 1;
-    const thisWeek = isoWeekStart(today);
+    const thisWeek = habitWeekStart(state, today);
     let run = 0, best = 0;
-    for (let w = isoWeekStart(start); w <= thisWeek; w = addDays(w, 7)) {
+    for (let w = habitWeekStart(state, start); w <= thisWeek; w = addDays(w, 7)) {
       const met = weekCount(state, h, w) >= times;
       if (met) { run++; best = Math.max(best, run); }
       else if (w !== thisWeek) run = 0;
@@ -138,6 +141,7 @@ export function completionRate(state, h, days = null, today = todayKey()) {
     let done = 0;
     for (let k = from; k <= today; k = addDays(k, 1)) if (habitDone(state, h, k)) done++;
     const span = diffDays(from, today) + 1;
+    if (done === 0 && span < 7) return null; // too early to judge a weekly goal
     const expected = Math.max(1, Math.round((span / 7) * times));
     return Math.min(1, done / expected);
   }

@@ -47,7 +47,7 @@ export function renderHabits() {
           h('span.emoji-bubble', { 'aria-hidden': 'true' }, hb.emoji),
           h('span.habit-row-text',
             h('span.habit-name', hb.name),
-            h('span.habit-sub', sub.join(' · ')))),
+            h('span.habit-sub', h('span.sub-text', sub.join(' · '))))),
         reorder
           ? h('button.drag-handle', { type: 'button', 'data-fk': 'dh-' + hb.id, 'aria-label': `Reorder ${hb.name} (use arrow keys)` }, icon('grip', { size: 20 }))
           : h('div.habit-actions',
