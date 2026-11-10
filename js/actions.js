@@ -1,0 +1,224 @@
+// State mutations used by views and forms (with undo where it matters).
+import { update, getState, uid } from './store.js';
+import { ctx } from './ctx.js';
+import { toast, haptic, choose } from './ui.js';
+import { isRecurring, isTaskDone, habitTarget, habitVal, dayProgress } from './logic.js';
+import { todayKey } from './dates.js';
+
+function celebrateIfDone(k, before) {
+  const after = dayProgress(getState(), k);
+  if (before.pct < 1 && after.pct === 1 && after.total > 0) {
+    ctx.anim.add('ring');
+    setTimeout(() => toast(k === todayKey() ? 'Everything done for today. Nice work! 🎉' : 'Everything done for that day 🎉'), 50);
+    haptic([20, 40, 20]);
+    return true;
+  }
+  return false;
+}
+
+// ---------- Tasks ----------
+export function toggleTask(id, k, { silentToast = false } = {}) {
+  const st = getState();
+  const t = st.tasks.find((x) => x.id === id);
+  if (!t) return;
+  const was = isTaskDone(t, k);
+  const before = dayProgress(st, k);
+  if (!was) ctx.anim.add('t-' + id);
+  update((s) => {
+    const x = s.tasks.find((y) => y.id === id);
+    if (isRecurring(x)) {
+      if (was) delete x.doneDates[k]; else x.doneDates[k] = true;
+    } else {
+      x.done = !was;
+    }
+  });
+  haptic(was ? 5 : 12);
+  if (!was && !celebrateIfDone(k, before) && !silentToast) {
+    toast(`Completed “${t.title}”`, { action: 'Undo', onAction: () => toggleTask(id, k, { silentToast: true }) });
+  }
+}
+
+export function moveToToday(ids) {
+  const today = todayKey();
+  const prev = new Map();
+  update((s) => {
+    for (const t of s.tasks) if (ids.includes(t.id)) { prev.set(t.id, t.date); t.date = today; }
+  });
+  toast(ids.length === 1 ? 'Moved to today' : `Moved ${ids.length} tasks to today`, {
+    action: 'Undo',
+    onAction: () => update((s) => { for (const t of s.tasks) if (prev.has(t.id)) t.date = prev.get(t.id); }),
+  });
+}
+
+export function saveTask(data) {
+  update((s) => {
+    const existing = data.id && s.tasks.find((t) => t.id === data.id);
+    if (existing) {
+      Object.assign(existing, data);
+    } else {
+      const maxOrder = s.tasks.reduce((m, t) => Math.max(m, t.order || 0), 0);
+      s.tasks.push({
+        notes: '', time: null, duration: null, priority: 0, category: null, reminder: null,
+        recur: { type: 'none', days: [], interval: 2 }, done: false, doneDates: {}, exceptions: [],
+        createdAt: Date.now(), ...data, id: uid(), order: maxOrder + 1,
+      });
+    }
+  });
+}
+
+/** Delete a task. For recurring tasks ask: this day only vs the whole series. Returns true if deleted. */
+export async function deleteTask(id, k) {
+  const st = getState();
+  const t = st.tasks.find((x) => x.id === id);
+  if (!t) return false;
+  if (isRecurring(t)) {
+    const choice = await choose('Delete repeating task', `“${t.title}” repeats. What would you like to delete?`, [
+      { value: 'one', label: 'This day only', style: 'secondary' },
+      { value: 'all', label: 'Whole series', style: 'danger' },
+      { value: null, label: 'Cancel', style: 'ghost' },
+    ]);
+    if (!choice) return false;
+    if (choice === 'one') {
+      update((s) => {
+        const x = s.tasks.find((y) => y.id === id);
+        if (!x.exceptions.includes(k)) x.exceptions.push(k);
+        delete x.doneDates[k];
+      });
+      toast('Removed from this day', {
+        action: 'Undo',
+        onAction: () => update((s) => {
+          const x = s.tasks.find((y) => y.id === id);
+          if (x) x.exceptions = x.exceptions.filter((d) => d !== k);
+        }),
+      });
+      return true;
+    }
+  }
+  const snapshot = JSON.parse(JSON.stringify(t));
+  const index = st.tasks.indexOf(t);
+  update((s) => { s.tasks = s.tasks.filter((x) => x.id !== id); });
+  toast(`Deleted “${t.title}”`, {
+    action: 'Undo',
+    onAction: () => update((s) => { s.tasks.splice(Math.min(index, s.tasks.length), 0, snapshot); }),
+  });
+  return true;
+}
+
+export function reorderTasks(ids) {
+  update((s) => {
+    ids.forEach((id, i) => { const t = s.tasks.find((x) => x.id === id); if (t) t.order = i; });
+  });
+}
+
+// ---------- Habits ----------
+export function setHabitValue(id, k, v) {
+  const st = getState();
+  const before = dayProgress(st, k);
+  const h = st.habits.find((x) => x.id === id);
+  if (!h) return;
+  const wasDone = habitVal(st, h, k) >= habitTarget(h);
+  const value = Math.max(0, Math.min(9999, v));
+  update((s) => {
+    s.logs[id] = s.logs[id] || {};
+    if (value > 0) s.logs[id][k] = value; else delete s.logs[id][k];
+  });
+  const nowDone = value >= habitTarget(h);
+  if (nowDone && !wasDone) { ctx.anim.add('h-' + id); haptic(15); celebrateIfDone(k, before); }
+  else haptic(6);
+}
+
+export function bumpHabit(id, k, delta) {
+  const st = getState();
+  const h = st.habits.find((x) => x.id === id);
+  if (!h) return;
+  const cur = habitVal(st, h, k);
+  if (h.goal.type !== 'count') {
+    setHabitValue(id, k, cur >= 1 ? 0 : 1);
+  } else {
+    if (delta < 0 && cur === 0) return;
+    setHabitValue(id, k, cur + delta);
+  }
+}
+
+/** Toggle a day fully done / not done (used by the week dots and calendars). */
+export function toggleHabitDay(id, k) {
+  const st = getState();
+  const h = st.habits.find((x) => x.id === id);
+  if (!h) return;
+  setHabitValue(id, k, habitVal(st, h, k) >= habitTarget(h) ? 0 : habitTarget(h));
+}
+
+export function saveHabit(data) {
+  let id = data.id;
+  update((s) => {
+    const existing = id && s.habits.find((x) => x.id === id);
+    if (existing) Object.assign(existing, data);
+    else {
+      id = uid();
+      const maxOrder = s.habits.reduce((m, x) => Math.max(m, x.order || 0), 0);
+      s.habits.push({ archived: false, createdAt: todayKey(), ...data, id, order: maxOrder + 1 });
+    }
+  });
+  return id;
+}
+
+export function setArchived(id, archived) {
+  update((s) => { const x = s.habits.find((y) => y.id === id); if (x) x.archived = archived; });
+  toast(archived ? 'Habit archived' : 'Habit restored', {
+    action: 'Undo',
+    onAction: () => update((s) => { const x = s.habits.find((y) => y.id === id); if (x) x.archived = !archived; }),
+  });
+}
+
+export function deleteHabit(id) {
+  const st = getState();
+  const habit = st.habits.find((x) => x.id === id);
+  if (!habit) return;
+  const snap = JSON.parse(JSON.stringify(habit));
+  const logs = st.logs[id] ? { ...st.logs[id] } : null;
+  update((s) => { s.habits = s.habits.filter((x) => x.id !== id); delete s.logs[id]; });
+  toast(`Deleted “${habit.name}”`, {
+    action: 'Undo',
+    onAction: () => update((s) => { s.habits.push(snap); if (logs) s.logs[id] = logs; }),
+  });
+}
+
+export function reorderHabits(ids) {
+  update((s) => { ids.forEach((id, i) => { const x = s.habits.find((y) => y.id === id); if (x) x.order = i; }); });
+}
+
+// ---------- Journal ----------
+export function setMood(k, mood) {
+  update((s) => {
+    const j = s.journal[k] || { mood: null, note: '' };
+    j.mood = j.mood === mood ? null : mood;
+    if (!j.mood && !j.note) delete s.journal[k]; else s.journal[k] = j;
+  });
+  haptic(8);
+}
+
+export function setNote(k, note) {
+  update((s) => {
+    const j = s.journal[k] || { mood: null, note: '' };
+    j.note = note.slice(0, 1000);
+    if (!j.mood && !j.note) delete s.journal[k]; else s.journal[k] = j;
+  }, { silent: true });
+}
+
+// ---------- Examples ----------
+export function seedExamples() {
+  const today = todayKey();
+  const examples = [
+    { name: 'Drink water', emoji: '💧', color: '#0ea5e9', goal: { type: 'count', target: 8, unit: 'glasses' }, timeOfDay: 'anytime', schedule: { type: 'daily', days: [], times: 3 } },
+    { name: 'Morning stretch', emoji: '🧘', color: '#8b5cf6', goal: { type: 'check', target: 1, unit: '' }, timeOfDay: 'morning', schedule: { type: 'daily', days: [], times: 3 } },
+    { name: 'Read 20 minutes', emoji: '📚', color: '#f59e0b', goal: { type: 'check', target: 1, unit: '' }, timeOfDay: 'evening', schedule: { type: 'daily', days: [], times: 3 } },
+    { name: 'Workout', emoji: '🏃', color: '#ef4444', goal: { type: 'check', target: 1, unit: '' }, timeOfDay: 'anytime', schedule: { type: 'perWeek', days: [], times: 3 } },
+  ];
+  update((s) => {
+    let order = s.habits.reduce((m, x) => Math.max(m, x.order || 0), 0);
+    for (const e of examples) {
+      if (s.habits.some((x) => x.name === e.name)) continue;
+      s.habits.push({ id: uid(), reminder: null, archived: false, createdAt: today, order: ++order, ...e });
+    }
+  });
+}
