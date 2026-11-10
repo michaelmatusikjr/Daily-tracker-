@@ -215,15 +215,16 @@ p { margin: 0; }
   display: flex; align-items: flex-end; justify-content: space-between; gap: var(--s3);
   margin-bottom: var(--s4);
 }
-.page-head-text { min-width: 0; }
+.page-head-text { min-width: 0; flex: 1; }
 .eyebrow { font-size: 14px; font-weight: 650; color: var(--text-2); }
 .page-title {
   margin: 2px 0 0; font-size: 28px; line-height: 1.15; font-weight: 760; letter-spacing: -.02em;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 .head-actions { display: flex; align-items: center; gap: 2px; flex: none; }
 .detail-head { align-items: center; }
 .detail-head .page-head-text { flex: 1; }
+.detail-head .page-title { overflow-wrap: anywhere; }
 .title-emoji { font-size: .95em; }
 
 /* ---------- Buttons ---------- */
@@ -696,6 +697,11 @@ input[type="date"].input, input[type="time"].input { min-width: 0; }
 .pchip.prio-1 { color: var(--prio-low); background: color-mix(in srgb, var(--prio-low) 12%, transparent); }
 .pchip.prio-2 { color: var(--prio-med); background: color-mix(in srgb, var(--prio-med) 14%, transparent); }
 .pchip.prio-3 { color: var(--prio-high); background: color-mix(in srgb, var(--prio-high) 12%, transparent); }
+.pchip.guess, .pchip.restore { border: none; min-height: 30px; cursor: pointer; font-family: inherit; }
+.pchip.guess:hover { filter: brightness(.95); }
+.pchip-x { opacity: .6; margin-left: 2px; }
+.pchip.restore { font-weight: 600; }
+.qa-title { font-size: 13px; color: var(--text-2); min-height: 18px; overflow-wrap: anywhere; }
 .qa-actions { display: flex; justify-content: space-between; gap: var(--s2); margin-top: var(--s1); }
 .shake { animation: shake .35s; }
 @keyframes shake { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
@@ -883,6 +889,8 @@ input[type="date"].input, input[type="time"].input { min-width: 0; }
 /* ---------- Misc ---------- */
 .noscript { padding: 24px; text-align: center; }
 @media (max-width: 370px) {
+  .head-actions .icon-btn { width: 40px; }
+  .head-actions .chip-btn { padding: 0 10px; margin-right: 2px; }
   .task-time { width: 54px; font-size: 11.5px; white-space: nowrap; }
   .task-time small { font-size: 10.5px; }
   .task.timed { padding-left: 6px; }
@@ -892,6 +900,7 @@ input[type="date"].input, input[type="time"].input { min-width: 0; }
   .detail-hero { gap: var(--s3); padding: var(--s4); }
   .hide-xs { display: none; }
   .page-title { font-size: 24px; }
+  .view-today .page-head:has(.chip-btn) .page-title { font-size: 22px; }
   .wd { min-width: 30px; }
 }
 @media (prefers-reduced-motion: reduce) {

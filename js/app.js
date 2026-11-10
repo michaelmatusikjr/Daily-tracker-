@@ -160,6 +160,14 @@ function init() {
   });
   onInstallChange(() => { if (parseRoute().name === 'settings') render(); });
   reschedule();
+  if (getLoadFailure()) {
+    // Make sure the warning is seen: no scroll restoration, start at the top, and a toast too.
+    try { history.scrollRestoration = 'manual'; } catch { /* ignore */ }
+    window.scrollTo(0, 0);
+    setTimeout(() => toast('Saved data couldn’t be read. Changes are paused until you choose.', {
+      action: 'Show', duration: 12000, onAction: () => window.scrollTo({ top: 0, behavior: 'smooth' }),
+    }), 300);
+  }
   if (!getState().settings.onboarded) showOnboarding();
   registerSW();
 }

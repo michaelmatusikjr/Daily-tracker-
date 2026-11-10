@@ -3,7 +3,7 @@ import { icon } from '../icons.js';
 import { getState } from '../store.js';
 import { ctx } from '../ctx.js';
 import { dayProgress, tasksOn, splitTasks, overdueTasks, activeHabits, isDueOn, habitStart, streaks, habitVal, habitTarget, MOODS, weekCount } from '../logic.js';
-import { addDays, todayKey, startOfWeek, fromKey, fmtDateLong, fmtDateShort, greeting, relativeLabel, nowMin, timeToMin, fmtTime, weekdayNarrow, weekdayLabels } from '../dates.js';
+import { fmt as fmtDate, addDays, todayKey, startOfWeek, fromKey, fmtDateLong, fmtDateShort, greeting, relativeLabel, nowMin, timeToMin, fmtTime, weekdayNarrow, weekdayLabels } from '../dates.js';
 import { taskRow, habitControl, streakBadge, timeRange } from './widgets.js';
 import { moveToToday, reorderTasks, setMood, setNote, bumpHabit } from '../actions.js';
 import { openQuickAdd } from '../forms.js';
@@ -24,7 +24,8 @@ export function renderToday() {
   root.append(h('header.page-head',
     h('div.page-head-text',
       h('p.eyebrow', isToday ? greeting() : relativeLabel(k, today)),
-      h('h1.page-title', fmtDateLong(k))),
+      // With the "Today" chip showing, narrow screens get a short date so words never break.
+      h('h1.page-title', !isToday && window.innerWidth < 400 ? fmtDate(k, { weekday: 'short', month: 'short', day: 'numeric' }) : fmtDateLong(k))),
     h('div.head-actions',
       !isToday ? h('button.chip-btn', { type: 'button', onclick: () => ctx.setDate(today) }, 'Today') : null,
       iconBtn('chevronLeft', 'Previous day', () => ctx.setDate(addDays(k, -1))),
@@ -95,10 +96,11 @@ export function renderToday() {
     for (const hb of habits) {
       const s = streaks(st, hb, today);
       const v = habitVal(st, hb, k);
+      // Most useful info first, since the line is truncated with an ellipsis.
       const sub = [];
-      if (TOD_LABEL[hb.timeOfDay]) sub.push(TOD_LABEL[hb.timeOfDay]);
-      if (hb.goal.type === 'count') sub.push(`${v}/${habitTarget(hb)}${hb.goal.unit ? ' ' + hb.goal.unit : ''}`);
       if (hb.schedule.type === 'perWeek') sub.push(`${weekCount(st, hb, k)}/${hb.schedule.times} this week`);
+      if (hb.goal.type === 'count') sub.push(`${v}/${habitTarget(hb)}${hb.goal.unit ? ' ' + hb.goal.unit : ''}`);
+      if (TOD_LABEL[hb.timeOfDay]) sub.push(TOD_LABEL[hb.timeOfDay]);
       list.append(h('li.habit-row', { style: { '--c': hb.color } },
         h('button.habit-row-main', { type: 'button', onclick: () => ctx.go('habit/' + hb.id), 'aria-label': `${hb.name} details` },
           h('span.emoji-bubble', { 'aria-hidden': 'true' }, hb.emoji),

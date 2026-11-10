@@ -1,7 +1,7 @@
 // Persistent app state in localStorage with a versioned schema + migrations.
 import { todayKey, isValidKey } from './dates.js';
 
-export const APP_VERSION = '1.0.1';
+export const APP_VERSION = '1.0.2';
 export const SCHEMA_VERSION = 1;
 const STORAGE_KEY = 'dailyTracker:data';
 const ACCENT_IDS = ['indigo', 'teal', 'rose', 'amber', 'green', 'blue'];
@@ -209,8 +209,7 @@ export function load() {
     state = raw ? migrate(JSON.parse(raw)) : defaultState();
   } catch (e) {
     console.warn('Could not read saved data; keeping a backup and pausing saves.', e);
-    const backupKey = `${STORAGE_KEY}:backup-${Date.now()}`;
-    try { localStorage.setItem(backupKey, raw); } catch { /* storage full: raw is still kept in memory */ }
+    const backupKey = writeBackup(raw);
     loadFailure = { raw, backupKey, error: String(e?.message || e) };
     state = defaultState();
     state.settings.onboarded = true;
@@ -218,11 +217,36 @@ export function load() {
   return state;
 }
 
+const BACKUP_PREFIX = `${STORAGE_KEY}:backup-`;
+function backupKeys() {
+  const keys = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(BACKUP_PREFIX)) keys.push(k);
+    }
+  } catch { /* ignore */ }
+  return keys.sort((a, b) => Number(b.slice(BACKUP_PREFIX.length)) - Number(a.slice(BACKUP_PREFIX.length))); // newest first
+}
+function pruneBackups(keep) {
+  backupKeys().slice(keep).forEach((k) => { try { localStorage.removeItem(k); } catch { /* ignore */ } });
+}
+/** Store the unreadable text once (no duplicate per reload) and keep only the newest 3 backups. */
+function writeBackup(raw) {
+  const existing = backupKeys().find((k) => { try { return localStorage.getItem(k) === raw; } catch { return false; } });
+  if (existing) return existing;
+  const key = BACKUP_PREFIX + Date.now();
+  try { localStorage.setItem(key, raw); } catch { /* storage full: raw is still kept in memory */ }
+  pruneBackups(3);
+  return key;
+}
+
 export const getLoadFailure = () => loadFailure;
 
 /** User chose to start fresh: allow saving again (the backup key stays in storage). */
 export function resolveLoadFailure() {
   loadFailure = null;
+  pruneBackups(1); // keep just the most recent copy of the unreadable data
   save();
   listeners.forEach((l) => l(state));
 }

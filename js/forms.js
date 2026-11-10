@@ -109,23 +109,43 @@ export function openQuickAdd() {
     type: 'text', placeholder: 'Try “Gym 6pm” or “Call mom tomorrow 14:30”', autofocus: true,
     'aria-label': 'New task', enterkeyhint: 'done', autocomplete: 'off', maxlength: 200, spellcheck: 'true',
   });
-  const preview = h('div.qa-preview', { 'aria-live': 'polite' });
+  const preview = h('div.qa-preview');
+  const ignore = { date: false, time: false, duration: false }; // guesses the user tapped away
   const parsed = () => {
-    const p = parseQuick(input.value);
+    const p = parseQuick(input.value, todayKey(), { noDate: ignore.date, noTime: ignore.time, noDuration: ignore.duration });
     p.date = p.date || ctx.ui.date;
     return p;
   };
+  const NAMES = { date: 'date', time: 'time', duration: 'duration' };
   function renderPreview() {
+    if (!input.value.trim()) Object.keys(ignore).forEach((k) => { ignore[k] = false; });
     const p = parsed();
+    const full = parseQuick(input.value, todayKey());
     const chip = (ic, text, cls = '') => h(`span.pchip${cls ? '.' + cls : ''}`, icon(ic, { size: 14 }), text);
-    const chips = [chip('calendar', relativeLabel(p.date))];
-    if (p.time) chips.push(chip('clock', fmtTime(p.time, st.settings.timeFormat) + (p.duration ? ` · ${fmtDuration(p.duration)}` : '')));
-    else if (p.duration) chips.push(chip('clock', fmtDuration(p.duration)));
-    else chips.push(chip('list', 'Anytime', 'muted'));
+    // A recognised guess is a button: tapping it drops the guess and keeps the words in the title.
+    const guess = (key, ic, text) => h('button.pchip.guess', {
+      type: 'button', title: `Keep “${p.parts[key]}” in the title`,
+      'aria-label': `${NAMES[key]}: ${text}. Tap to keep “${p.parts[key]}” in the title instead`,
+      onclick: () => { ignore[key] = true; renderPreview(); input.focus(); },
+    }, icon(ic, { size: 14 }), text, icon('x', { size: 12, cls: 'pchip-x' }));
+    const restore = (key) => h('button.pchip.muted.restore', {
+      type: 'button', 'aria-label': `Use “${full.parts[key]}” as the ${NAMES[key]} again`,
+      onclick: () => { ignore[key] = false; renderPreview(); input.focus(); },
+    }, icon('refresh', { size: 12 }), `“${full.parts[key]}” as ${NAMES[key]}`);
+    const fmt = st.settings.timeFormat;
+    const chips = [];
+    chips.push(p.parts.date ? guess('date', 'calendar', relativeLabel(p.date)) : chip('calendar', relativeLabel(p.date)));
+    if (p.time) chips.push(p.parts.time ? guess('time', 'clock', fmtTime(p.time, fmt)) : chip('clock', fmtTime(p.time, fmt)));
+    if (p.duration) chips.push(guess('duration', 'clock', fmtDuration(p.duration)));
+    if (!p.time && !p.duration) chips.push(chip('list', 'Anytime', 'muted'));
     if (p.priority) chips.push(chip('flag', PRIORITIES[p.priority].label, 'prio-' + p.priority));
     if (p.tag) chips.push(chip('tag', p.tag));
+    for (const key of Object.keys(ignore)) if (ignore[key] && full.parts[key]) chips.push(restore(key));
+    const showTitle = input.value.trim() && p.title !== input.value.trim();
     preview.replaceChildren(...chips);
+    titleLine.textContent = showTitle ? `Title: “${p.title}”` : '';
   }
+  const titleLine = h('p.qa-title', { 'aria-live': 'polite' });
   input.addEventListener('input', renderPreview);
   renderPreview();
 
@@ -151,7 +171,8 @@ export function openQuickAdd() {
   const form = h('form.qa-form', { onsubmit: (e) => { e.preventDefault(); submit(); } },
     input,
     preview,
-    h('p.field-hint', 'Understands today, tomorrow, weekdays, “6pm”, “18:00”, “at 9”, “for 30m”, “!!” priority and #tags.'),
+    titleLine,
+    h('p.field-hint', 'Tap a guessed date or time to keep those words in the title. Understands today, tomorrow, weekdays, “6pm”, “18:00”, “at 9”, “for 30m”, “!!” priority and #tags.'),
     h('div.qa-actions',
       h('button.btn.ghost', {
         type: 'button',
