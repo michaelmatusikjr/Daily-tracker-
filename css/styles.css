@@ -225,6 +225,11 @@ p { margin: 0; }
 .detail-head { align-items: center; }
 .detail-head .page-head-text { flex: 1; }
 .detail-head .page-title { overflow-wrap: anywhere; }
+.title-short { display: none; }
+@media (max-width: 399px) {
+  .page-title:has(.title-short) .title-long { display: none; }
+  .page-title .title-short { display: inline; }
+}
 .title-emoji { font-size: .95em; }
 
 /* ---------- Buttons ---------- */

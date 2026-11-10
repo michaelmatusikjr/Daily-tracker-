@@ -130,7 +130,7 @@ export function openQuickAdd() {
     }, icon(ic, { size: 14 }), text, icon('x', { size: 12, cls: 'pchip-x' }));
     const restore = (key) => h('button.pchip.muted.restore', {
       type: 'button', 'aria-label': `Use “${full.parts[key]}” as the ${NAMES[key]} again`,
-      onclick: () => { ignore[key] = false; renderPreview(); input.focus(); },
+      onclick: () => { Object.keys(ignore).forEach((k) => { if (k === key || !full.parts[k]) ignore[k] = false; }); renderPreview(); input.focus(); },
     }, icon('refresh', { size: 12 }), `“${full.parts[key]}” as ${NAMES[key]}`);
     const fmt = st.settings.timeFormat;
     const chips = [];
@@ -140,7 +140,8 @@ export function openQuickAdd() {
     if (!p.time && !p.duration) chips.push(chip('list', 'Anytime', 'muted'));
     if (p.priority) chips.push(chip('flag', PRIORITIES[p.priority].label, 'prio-' + p.priority));
     if (p.tag) chips.push(chip('tag', p.tag));
-    for (const key of Object.keys(ignore)) if (ignore[key] && full.parts[key]) chips.push(restore(key));
+    // Offer a restore chip for every guess the full parse found but this one doesn't show.
+    for (const key of Object.keys(ignore)) if (full.parts[key] && !p.parts[key]) chips.push(restore(key));
     const showTitle = input.value.trim() && p.title !== input.value.trim();
     preview.replaceChildren(...chips);
     titleLine.textContent = showTitle ? `Title: “${p.title}”` : '';

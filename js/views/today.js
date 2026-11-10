@@ -3,13 +3,22 @@ import { icon } from '../icons.js';
 import { getState } from '../store.js';
 import { ctx } from '../ctx.js';
 import { dayProgress, tasksOn, splitTasks, overdueTasks, activeHabits, isDueOn, habitStart, streaks, habitVal, habitTarget, MOODS, weekCount } from '../logic.js';
-import { fmt as fmtDate, addDays, todayKey, startOfWeek, fromKey, fmtDateLong, fmtDateShort, greeting, relativeLabel, nowMin, timeToMin, fmtTime, weekdayNarrow, weekdayLabels } from '../dates.js';
+import { fmt as fmtDate, diffDays, addDays, todayKey, startOfWeek, fromKey, fmtDateLong, fmtDateShort, greeting, nowMin, timeToMin, fmtTime, weekdayNarrow, weekdayLabels } from '../dates.js';
 import { taskRow, habitControl, streakBadge, timeRange } from './widgets.js';
 import { moveToToday, reorderTasks, setMood, setNote, bumpHabit } from '../actions.js';
 import { openQuickAdd } from '../forms.js';
 
 const TOD_ORDER = { morning: 0, afternoon: 1, evening: 2, anytime: 3 };
 const TOD_LABEL = { morning: 'Morning', afternoon: 'Afternoon', evening: 'Evening', anytime: '' };
+
+/** "Tomorrow", "In 3 days", "12 days ago" (+ year when it differs) — never repeats the title. */
+function eyebrowLabel(k, today) {
+  const d = diffDays(today, k);
+  if (d === 1) return 'Tomorrow';
+  if (d === -1) return 'Yesterday';
+  const rel = d > 0 ? `In ${d} days` : `${-d} days ago`;
+  return k.slice(0, 4) !== today.slice(0, 4) ? `${rel} · ${k.slice(0, 4)}` : rel;
+}
 
 export function renderToday() {
   const st = getState();
@@ -23,9 +32,11 @@ export function renderToday() {
   // ---- Header ----
   root.append(h('header.page-head',
     h('div.page-head-text',
-      h('p.eyebrow', isToday ? greeting() : relativeLabel(k, today)),
-      // With the "Today" chip showing, narrow screens get a short date so words never break.
-      h('h1.page-title', !isToday && window.innerWidth < 400 ? fmtDate(k, { weekday: 'short', month: 'short', day: 'numeric' }) : fmtDateLong(k))),
+      h('p.eyebrow', isToday ? greeting() : eyebrowLabel(k, today)),
+      // With the "Today" chip showing, narrow screens get a short date (swapped in CSS).
+      h('h1.page-title',
+        h('span.title-long', fmtDateLong(k)),
+        !isToday ? h('span.title-short', fmtDate(k, { weekday: 'short', month: 'short', day: 'numeric' })) : null)),
     h('div.head-actions',
       !isToday ? h('button.chip-btn', { type: 'button', onclick: () => ctx.setDate(today) }, 'Today') : null,
       iconBtn('chevronLeft', 'Previous day', () => ctx.setDate(addDays(k, -1))),

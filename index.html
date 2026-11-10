@@ -18,7 +18,9 @@
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="stylesheet" href="css/styles.css">
   <script>
-    // Apply saved theme before first paint to avoid a flash.
+    // Apply saved theme before first paint to avoid a flash. Scroll restoration is manual so
+    // important notices (e.g. unreadable data) are never restored out of view.
+    try { history.scrollRestoration = 'manual'; } catch (e) {}
     try {
       var s = JSON.parse(localStorage.getItem('dailyTracker:data') || '{}').settings || {};
       if (s.theme === 'light' || s.theme === 'dark') document.documentElement.dataset.theme = s.theme;

@@ -1,7 +1,7 @@
 // Persistent app state in localStorage with a versioned schema + migrations.
 import { todayKey, isValidKey } from './dates.js';
 
-export const APP_VERSION = '1.0.2';
+export const APP_VERSION = '1.0.3';
 export const SCHEMA_VERSION = 1;
 const STORAGE_KEY = 'dailyTracker:data';
 const ACCENT_IDS = ['indigo', 'teal', 'rose', 'amber', 'green', 'blue'];

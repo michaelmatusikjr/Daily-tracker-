@@ -11,7 +11,7 @@ const SHORT_DAYS = { sun: 0, mon: 1, tue: 2, tues: 2, wed: 3, weds: 3, thu: 4, t
 const DAY_WORDS = [...Object.keys(FULL_DAYS), ...Object.keys(SHORT_DAYS)];
 const DATE_WORDS = ['today', 'tonight', 'tomorrow', 'tmrw', 'tmr', ...DAY_WORDS];
 const CONNECTOR = /\s(at|on|by|for|@)\s*$/i;
-const EVENING_WORDS = /\b(dinner|supper|drinks|movie|movies|party|date night)\b/i;
+const EVENING_WORDS = /\b(dinner|supper|drinks|movie|movies|party|night|bed|bedtime|sleep)\b/i;
 const B = '(?=[\\s,.;:!?])'; // token boundary (the working string always ends with a space)
 
 export function parseQuick(input, today = todayKey(), opts = {}) {
@@ -95,6 +95,10 @@ export function parseQuick(input, today = todayKey(), opts = {}) {
       }));
   }
 
+  // Whether the text contains a time at all — even if the user dropped the time guess —
+  // so dropping the time chip doesn't silently change how a leading weekday is read.
+  const timeSeen = !!out.time || (opts.noTime && !!parseQuick(raw, today, { noDate: true }).time);
+
   // Dates ("day after tomorrow" must be checked before "tomorrow")
   if (!opts.noDate) {
     record('date',
@@ -120,7 +124,7 @@ export function parseQuick(input, today = todayKey(), opts = {}) {
           if (!isFull && !atEnd) return false;
           // A leading full weekday is a date only with an explicit time, punctuation after it
           // ("Monday: gym"), or when it's the only word. Otherwise it's part of the title.
-          if (isFull && atStart && !atEnd && !out.time && !/^[,:;.]/.test(s.slice(end))) return false;
+          if (isFull && atStart && !atEnd && !timeSeen && !/^[,:;.]/.test(s.slice(end))) return false;
         }
         const target = isFull ? FULL_DAYS[word] : SHORT_DAYS[word];
         let diff = (target - dow(today) + 7) % 7;
