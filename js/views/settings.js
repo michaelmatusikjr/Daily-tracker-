@@ -4,10 +4,11 @@ import { getState, update, replaceState, exportPayload, validateImport, defaultS
 import { ctx } from '../ctx.js';
 import { ACCENTS } from '../theme.js';
 import { todayKey } from '../dates.js';
-import { notifySupported, permission, requestPermission, showNotification, reschedule } from '../notify.js';
+import { notifySupported, requestPermission, showNotification, reschedule } from '../notify.js';
 import { canInstall, promptInstall, isIOS, isStandalone } from '../pwa.js';
 import { showOnboarding } from '../onboarding.js';
 import { ensureCategory } from '../forms.js';
+import { reminderStatus, reminderProblem, activeReminders, blockedHelp } from '../reminders.js';
 
 const setSetting = (key, value, silent = false) => update((s) => { s.settings[key] = value; }, { silent });
 
@@ -67,24 +68,40 @@ export function renderSettings() {
     }, catInput, h('button.btn.secondary', { type: 'submit' }, icon('plus', { size: 16 }), 'Add'))));
 
   // Reminders
-  const perm = permission();
+  const rStatus = reminderStatus();
+  const active = activeReminders();
+  const notifOn = rStatus === 'ok';
+  const count = active.total;
+  const countText = `${count} reminder${count === 1 ? '' : 's'}`;
+  let banner = null;
+  if (count && !notifOn) {
+    banner = h('div.reminder-banner.warn', { role: 'status' }, icon('bellOff', { size: 18 }),
+      h('span', h('b', `${countText} won’t appear. `), reminderProblem(rStatus) || ''),
+      rStatus === 'needs-install' ? h('button.link-btn.inline', { type: 'button', onclick: () => document.getElementById('set-install')?.scrollIntoView({ block: 'center', behavior: 'smooth' }) }, 'How to add it') : null);
+  } else if (count) {
+    banner = h('div.reminder-banner.ok', { role: 'status' }, icon('bell', { size: 18 }), h('span', `${countText} set. They appear while Daily Tracker is open or was recently used.`));
+  }
   let notifDesc = 'Reminders fire while the app is open or was recently used. Browsers cannot guarantee reminders when the app is fully closed.';
-  if (perm === 'unsupported') notifDesc = isIOS() && !isStandalone()
-    ? 'On iPhone, add the app to your Home Screen first to enable notifications.'
-    : 'This browser does not support notifications.';
-  else if (perm === 'denied') notifDesc = 'Notifications are blocked for this site. Enable them in your browser settings.';
-  const notifOn = set.notifications && perm === 'granted';
+  if (rStatus === 'needs-install') notifDesc = 'On iPhone, add the app to your Home Screen first to enable notifications.';
+  else if (rStatus === 'unsupported') notifDesc = 'This browser does not support notifications.';
+  else if (rStatus === 'denied') notifDesc = `Notifications are blocked for this app. ${blockedHelp()}`;
   root.append(group('Reminders',
+    banner,
     row('Notifications', notifDesc, toggle(notifOn, 'Notifications', async (on) => {
-      if (!on) { setSetting('notifications', false); reschedule(); return; }
-      if (!notifySupported()) { toast('Notifications are not supported here'); return; }
+      if (!on) {
+        if (count && !(await confirmDialog('Turn off notifications?', `${countText} won’t fire while notifications are off.`, { ok: 'Turn off', danger: true }))) return;
+        setSetting('notifications', false); reschedule(); return;
+      }
+      if (!notifySupported()) { toast(rStatus === 'needs-install' ? 'Add the app to your Home Screen first' : 'Notifications are not supported here'); return; }
       const p = await requestPermission();
       if (p === 'granted') { setSetting('notifications', true); reschedule(); toast('Reminders on'); }
-      else { setSetting('notifications', false); toast('Permission was not granted'); }
+      else { setSetting('notifications', false); toast(p === 'denied' ? 'Notifications are blocked – see the help text' : 'Permission was not granted'); }
     })),
     notifOn ? h('div.set-actions', h('button.btn.secondary.small', {
       type: 'button', onclick: async () => { const ok = await showNotification('Daily Tracker', 'Notifications are working 👍', 'test'); if (!ok) toast('Could not show a notification'); },
-    }, icon('bell', { size: 16 }), 'Send test')) : null));
+    }, icon('bell', { size: 16 }), 'Send test')) : null,
+    h('div.set-row', h('div.set-text', h('span.set-label', 'Alarms'), h('span.set-desc', 'Wake-up alarms, Bedside mode and scan-to-stop codes.')),
+      h('a.btn.secondary.small', { href: '#alarms' }, icon('alarm', { size: 16 }), 'Open'))));
 
   // Install
   let installCtl;
@@ -98,6 +115,7 @@ export function renderSettings() {
           h('li', 'Tap the Share button ', icon('share', { size: 15 }), ' in the toolbar.'),
           h('li', 'Choose “Add to Home Screen”, then tap Add.'))));
   } else installCtl = row('Install app', 'Use your browser menu (“Install app” or “Add to Home screen”). The option appears once the browser allows it.', h('span.badge', icon('phone', { size: 14 }), 'Browser menu'));
+  installCtl.id = 'set-install';
   root.append(group('App', installCtl));
 
   // Data

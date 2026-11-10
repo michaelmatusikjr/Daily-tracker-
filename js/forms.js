@@ -6,6 +6,9 @@ import { ctx } from './ctx.js';
 import { parseQuick } from './parse.js';
 import { saveTask, deleteTask, saveHabit } from './actions.js';
 import { PRIORITIES } from './logic.js';
+import { reminderStatus, reminderProblem, ensureReminderPermission } from './reminders.js';
+import { openAlarmForm } from './views/alarms.js';
+import { closeAllSheets } from './ui.js';
 import { dow, fmtTime, fmtDuration, relativeLabel, weekdayLabels, isValidKey, todayKey } from './dates.js';
 
 export const HABIT_COLORS = ['#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f97316', '#f59e0b', '#10b981', '#14b8a6', '#0ea5e9', '#64748b'];
@@ -23,6 +26,30 @@ function firstGrapheme(str) {
   } catch { /* fall through */ }
   const m = str.match(/^(?:\p{RI}\p{RI}|\p{Extended_Pictographic}(?:\uFE0F|\p{EMod})?(?:\u200D\p{Extended_Pictographic}(?:\uFE0F|\p{EMod})?)*|.)/su);
   return m ? m[0] : [...str][0];
+}
+
+/** Live note under a reminder field: explains if the reminder can't fire and how to fix it. */
+function reminderNotice(hasReminder) {
+  const el = h('div.reminder-note', { role: 'status', 'aria-live': 'polite' });
+  const refresh = () => {
+    if (!hasReminder()) { el.replaceChildren(); el.hidden = true; return; }
+    el.hidden = false;
+    const status = reminderStatus();
+    const problem = reminderProblem(status);
+    if (!problem || status === 'default' || status === 'off') {
+      // 'default'/'off' are fixed automatically when the reminder is chosen or saved.
+      el.className = 'reminder-note ok';
+      el.replaceChildren(icon('bell', { size: 15 }), h('span', 'You’ll get a notification while Daily Tracker is open or was recently used.'));
+      return;
+    }
+    el.className = 'reminder-note warn';
+    el.replaceChildren(icon('bellOff', { size: 15 }), h('span', problem,
+      status === 'needs-install' ? h('button.link-btn.inline', {
+        type: 'button', onclick: () => { closeAllSheets(); ctx.go('settings'); setTimeout(() => document.getElementById('set-install')?.scrollIntoView({ block: 'center' }), 350); },
+      }, 'How to add it') : null));
+  };
+  refresh();
+  return { el, refresh };
 }
 
 function field(label, control, hint = null, id = null) {
@@ -191,7 +218,11 @@ export function openQuickAdd() {
   const modeSwitch = segmented([
     { value: 'task', label: 'Task', icon: 'check' },
     { value: 'habit', label: 'Habit', icon: 'habits' },
-  ], 'task', (v) => { if (v === 'habit') { sheet.close(); openHabitForm(null); } }, { label: 'What to add' });
+    { value: 'alarm', label: 'Alarm', icon: 'alarm' },
+  ], 'task', (v) => {
+    if (v === 'habit') { sheet.close(); openHabitForm(null); }
+    if (v === 'alarm') { sheet.close(); openAlarmForm(null); }
+  }, { label: 'What to add' });
 
   const sheet = openSheet({ title: 'Quick add', content: [modeSwitch, form] });
 }
@@ -220,9 +251,16 @@ export function openTaskForm(task, defaults = {}) {
   const reminder = select([['', 'No reminder'], [0, 'At start time'], [5, '5 min before'], [10, '10 min before'], [15, '15 min before'], [30, '30 min before'], [60, '1 hour before']], d.reminder ?? '');
   const reminderField = field('Reminder', reminder);
   const timeExtras = h('div.grid-2', field('Duration', duration), reminderField);
+  const taskNotice = reminderNotice(() => !!time.value && reminder.value !== '');
+  // Choosing a reminder is a user gesture: ask for permission / switch notifications on right away.
+  reminder.addEventListener('change', () => {
+    taskNotice.refresh();
+    if (reminder.value !== '') ensureReminderPermission().then(taskNotice.refresh);
+  });
   function syncTime() {
     const has = !!time.value;
     reminderField.hidden = !has;
+    taskNotice?.refresh();
     clearTime.hidden = !has;
   }
   time.addEventListener('input', syncTime);
@@ -290,6 +328,7 @@ export function openTaskForm(task, defaults = {}) {
     field('Notes', notes),
     h('div.grid-2', field('Date', date), h('div.field', h('label.field-label', { for: 'task-time' }, 'Start time ', clearTime), time)),
     timeExtras,
+    taskNotice.el,
     groupField('Priority', prio),
     groupField('Category', catWrap),
     field('Repeat', recurSel),
@@ -312,6 +351,7 @@ export function openTaskForm(task, defaults = {}) {
       recur: { type: recur.type, days: recur.days, interval: Math.max(2, Math.min(365, parseInt(intervalInput.value, 10) || 2)) },
     };
     if (!isNew) data.id = task.id;
+    if (data.reminder !== null && ['default', 'off'].includes(reminderStatus())) ensureReminderPermission();
     saveTask(data);
     sheet.close();
     if (isNew) toast(`Added “${t}”`);
@@ -381,6 +421,11 @@ export function openHabitForm(habit) {
   ], d.timeOfDay, (v) => { d.timeOfDay = v; }, { label: 'Time of day', small: true });
 
   const reminder = h('input.input', { type: 'time', value: d.reminder || '' });
+  const habitNotice = reminderNotice(() => /^\d{2}:\d{2}$/.test(reminder.value));
+  reminder.addEventListener('change', () => {
+    habitNotice.refresh();
+    if (reminder.value) ensureReminderPermission().then(habitNotice.refresh);
+  });
   const err = h('p.form-error', { role: 'alert' });
 
   const form = h('form.form', { onsubmit: (e) => { e.preventDefault(); submit(); }, novalidate: true },
@@ -391,6 +436,7 @@ export function openHabitForm(habit) {
     groupField('Goal', h('div', goal, countRow), 'Count goals: tap to add one, long-press (or right-click) to remove one.'),
     groupField('Time of day', tod),
     field('Reminder', reminder, 'Optional. Reminders fire while the app is open or was recently used.'),
+    habitNotice.el,
     err);
   syncSched(); syncGoal();
 
@@ -404,6 +450,7 @@ export function openHabitForm(habit) {
       timeOfDay: d.timeOfDay,
       reminder: /^\d{2}:\d{2}$/.test(reminder.value) ? reminder.value : null,
     };
+    if (data.reminder && ['default', 'off'].includes(reminderStatus())) ensureReminderPermission();
     if (!isNew) data.id = habit.id;
     saveHabit(data);
     sheet.close();

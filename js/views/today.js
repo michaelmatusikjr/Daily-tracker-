@@ -4,7 +4,9 @@ import { getState } from '../store.js';
 import { ctx } from '../ctx.js';
 import { dayProgress, tasksOn, splitTasks, overdueTasks, activeHabits, isDueOn, habitStart, streaks, habitVal, habitTarget, MOODS, weekCount } from '../logic.js';
 import { fmt as fmtDate, diffDays, addDays, todayKey, startOfWeek, fromKey, fmtDateLong, fmtDateShort, greeting, nowMin, timeToMin, fmtTime, weekdayNarrow, weekdayLabels } from '../dates.js';
-import { taskRow, habitControl, streakBadge, timeRange } from './widgets.js';
+import { taskRow, habitControl, streakBadge, timeRange, reminderWarnBadge } from './widgets.js';
+import { canFire } from '../reminders.js';
+import { nextAlarm } from '../alarms.js';
 import { moveToToday, reorderTasks, setMood, setNote, bumpHabit } from '../actions.js';
 import { openQuickAdd } from '../forms.js';
 
@@ -20,6 +22,13 @@ function eyebrowLabel(k, today) {
   return k.slice(0, 4) !== today.slice(0, 4) ? `${rel} · ${k.slice(0, 4)}` : rel;
 }
 
+/** Small "⏰ 6:30 AM" link to the Alarms page (shows the next alarm, if any). */
+function alarmPill(fmt) {
+  const n = nextAlarm();
+  const label = n ? fmtTime(`${String(new Date(n.at).getHours()).padStart(2, '0')}:${String(new Date(n.at).getMinutes()).padStart(2, '0')}`, fmt) : 'Alarms';
+  return h(`a.alarm-pill${n ? '.on' : ''}`, { href: '#alarms', 'aria-label': n ? `Alarms. Next alarm ${label}` : 'Alarms' }, icon('alarm', { size: 14 }), label);
+}
+
 export function renderToday() {
   const st = getState();
   const k = ctx.ui.date;
@@ -32,7 +41,7 @@ export function renderToday() {
   // ---- Header ----
   root.append(h('header.page-head',
     h('div.page-head-text',
-      h('p.eyebrow', isToday ? greeting() : eyebrowLabel(k, today)),
+      h('div.eyebrow-row', h('p.eyebrow', isToday ? greeting() : eyebrowLabel(k, today)), alarmPill(fmt)),
       // With the "Today" chip showing, narrow screens get a short date (swapped in CSS).
       h('h1.page-title',
         h('span.title-long', fmtDateLong(k)),
@@ -115,7 +124,7 @@ export function renderToday() {
       list.append(h('li.habit-row', { style: { '--c': hb.color } },
         h('button.habit-row-main', { type: 'button', onclick: () => ctx.go('habit/' + hb.id), 'aria-label': `${hb.name} details` },
           h('span.emoji-bubble', { 'aria-hidden': 'true' }, hb.emoji),
-          h('span.habit-row-text', h('span.habit-name', hb.name), sub.length || s.current ? h('span.habit-sub', streakBadge(s), h('span.sub-text', sub.join(' · '))) : null)),
+          h('span.habit-row-text', h('span.habit-name', hb.name), sub.length || s.current || (hb.reminder && !canFire()) ? h('span.habit-sub', streakBadge(s), hb.reminder && !canFire() ? reminderWarnBadge() : null, h('span.sub-text', sub.join(' · '))) : null)),
         hb.goal.type === 'count' && v > 0 && k <= today ? iconBtn('minus', `Remove one from ${hb.name}`, () => bumpHabit(hb.id, k, -1), 'minus-btn') : null,
         habitControl(hb, k)));
     }

@@ -1,6 +1,6 @@
 // Daily Tracker service worker: cache-first app shell, versioned cache.
 // Bump VERSION whenever any app file changes so clients get the update.
-const VERSION = '1.0.3';
+const VERSION = '1.1.0';
 const CACHE = `daily-tracker-${VERSION}`;
 const SHELL = [
   './',
@@ -9,6 +9,9 @@ const SHELL = [
   './css/styles.css',
   './js/app.js',
   './js/actions.js',
+  './js/alarms.js',
+  './js/alarmScreens.js',
+  './js/audio.js',
   './js/ctx.js',
   './js/dates.js',
   './js/forms.js',
@@ -18,9 +21,12 @@ const SHELL = [
   './js/onboarding.js',
   './js/parse.js',
   './js/pwa.js',
+  './js/reminders.js',
+  './js/scanner.js',
   './js/store.js',
   './js/theme.js',
   './js/ui.js',
+  './js/views/alarms.js',
   './js/views/calendar.js',
   './js/views/habitDetail.js',
   './js/views/habits.js',
@@ -28,6 +34,8 @@ const SHELL = [
   './js/views/stats.js',
   './js/views/today.js',
   './js/views/widgets.js',
+  // Barcode/QR decoder fallback (lazy-loaded by the page, precached for offline use).
+  './vendor/zxing/zxing.min.js',
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',

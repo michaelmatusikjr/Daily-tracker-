@@ -4,7 +4,8 @@ import { getState } from '../store.js';
 import { ctx } from '../ctx.js';
 import { activeHabits, streaks, scheduleLabel, habitVal, habitTarget } from '../logic.js';
 import { todayKey, weekdayLabels } from '../dates.js';
-import { habitControl, weekDots, streakBadge } from './widgets.js';
+import { habitControl, weekDots, streakBadge, reminderWarnBadge } from './widgets.js';
+import { canFire } from '../reminders.js';
 import { reorderHabits, setArchived, seedExamples, bumpHabit } from '../actions.js';
 import { openHabitForm } from '../forms.js';
 
@@ -47,7 +48,7 @@ export function renderHabits() {
           h('span.emoji-bubble', { 'aria-hidden': 'true' }, hb.emoji),
           h('span.habit-row-text',
             h('span.habit-name', hb.name),
-            h('span.habit-sub', h('span.sub-text', sub.join(' · '))))),
+            h('span.habit-sub', hb.reminder && !canFire() ? reminderWarnBadge() : null, h('span.sub-text', sub.join(' · '))))),
         reorder
           ? h('button.drag-handle', { type: 'button', 'data-fk': 'dh-' + hb.id, 'aria-label': `Reorder ${hb.name} (use arrow keys)` }, icon('grip', { size: 20 }))
           : h('div.habit-actions',

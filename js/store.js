@@ -1,8 +1,8 @@
 // Persistent app state in localStorage with a versioned schema + migrations.
 import { todayKey, isValidKey } from './dates.js';
 
-export const APP_VERSION = '1.0.3';
-export const SCHEMA_VERSION = 1;
+export const APP_VERSION = '1.1.0';
+export const SCHEMA_VERSION = 2;
 const STORAGE_KEY = 'dailyTracker:data';
 const ACCENT_IDS = ['indigo', 'teal', 'rose', 'amber', 'green', 'blue'];
 
@@ -43,12 +43,15 @@ export function defaultState() {
     habits: [],
     logs: {},
     journal: {},
+    alarms: [],
+    codes: [],
   };
 }
 
 // Migration hook: migrations[n] upgrades a version-n object to version n+1.
 const migrations = {
-  // 1: (data) => { /* e.g. rename fields */ return data; },
+  // v1 → v2: alarms and registered scan codes were added.
+  1: (data) => ({ ...data, alarms: Array.isArray(data.alarms) ? data.alarms : [], codes: Array.isArray(data.codes) ? data.codes : [] }),
 };
 
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
@@ -79,6 +82,42 @@ function normTask(t, i) {
     exceptions: Array.isArray(t.exceptions) ? t.exceptions.filter(isValidKey) : [],
     order: Number.isFinite(t.order) ? t.order : i,
     createdAt: Number.isFinite(t.createdAt) ? t.createdAt : Date.now(),
+  };
+}
+
+export const ALARM_TONES = ['classic', 'digital', 'chime', 'sunrise'];
+
+function normAlarm(a) {
+  if (!isObj(a) || !TIME_RE.test(a.time)) return null;
+  const days = Array.isArray(a.days) ? [...new Set(a.days.filter((d) => Number.isInteger(d) && d >= 0 && d < 7))].sort() : [];
+  return {
+    id: str(a.id, 40) || uid(),
+    time: a.time,
+    label: str(a.label, 60).trim(),
+    days, // [] = once
+    enabled: a.enabled !== false,
+    tone: ALARM_TONES.includes(a.tone) ? a.tone : 'classic',
+    gradual: !!a.gradual,
+    snoozeMin: [5, 10, 15].includes(a.snoozeMin) ? a.snoozeMin : 10,
+    maxSnoozes: Number.isInteger(a.maxSnoozes) && a.maxSnoozes >= 0 && a.maxSnoozes <= 10 ? a.maxSnoozes : 3,
+    vibrate: a.vibrate !== false,
+    dismiss: a.dismiss === 'scan' ? 'scan' : 'normal',
+    scanSnooze: !!a.scanSnooze,
+    codeIds: Array.isArray(a.codeIds) ? a.codeIds.filter((x) => typeof x === 'string').slice(0, 20) : [],
+    createdAt: Number.isFinite(a.createdAt) ? a.createdAt : Date.now(),
+    // Occurrences before this moment are never rung or reported as missed (set on save/enable).
+    armedAt: Number.isFinite(a.armedAt) ? a.armedAt : Date.now(),
+  };
+}
+
+function normCode(c) {
+  if (!isObj(c) || typeof c.value !== 'string' || !c.value) return null;
+  return {
+    id: str(c.id, 40) || uid(),
+    value: c.value.slice(0, 500),
+    format: str(c.format, 30),
+    nickname: str(c.nickname, 40).trim() || 'My code',
+    createdAt: Number.isFinite(c.createdAt) ? c.createdAt : Date.now(),
   };
 }
 
@@ -150,6 +189,10 @@ export function normalize(data) {
       out.logs[hid] = clean;
     }
   }
+  out.alarms = dedupeIds((Array.isArray(data.alarms) ? data.alarms : []).map(normAlarm).filter(Boolean)).slice(0, 50);
+  out.codes = dedupeIds((Array.isArray(data.codes) ? data.codes : []).map(normCode).filter(Boolean)).slice(0, 20);
+  const codeIds = new Set(out.codes.map((c) => c.id));
+  out.alarms.forEach((a) => { a.codeIds = a.codeIds.filter((id) => codeIds.has(id)); });
   out.journal = {};
   if (isObj(data.journal)) {
     for (const [k, v] of Object.entries(data.journal)) {

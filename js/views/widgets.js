@@ -7,6 +7,13 @@ import { bumpHabit, toggleHabitDay, toggleTask } from '../actions.js';
 import { habitVal, habitTarget, isScheduled, habitStart, isTaskDone, isRecurring, PRIORITIES, weekCount, recurrenceLabel } from '../logic.js';
 import { addDays, fmtTime, fmtDuration, weekdayNarrow, weekdayLabels, fmtDateShort, todayKey, timeToMin, minToTime } from '../dates.js';
 import { openTaskForm } from '../forms.js';
+import { canFire, reminderProblem } from '../reminders.js';
+
+/** Small bell-off badge for a reminder that can't fire right now. */
+export function reminderWarnBadge() {
+  const why = reminderProblem() || 'Notifications are off';
+  return h('span.meta.warn-badge', { title: `Reminder won’t appear: ${why}` }, icon('bellOff', { size: 13 }), h('span.sr-only', `Reminder won’t appear: ${why}`));
+}
 
 /** One-tap habit control: check button, or count button (tap +1, long-press/right-click −1). */
 export function habitControl(hb, k, { big = false } = {}) {
@@ -87,7 +94,9 @@ export function taskRow(t, k, { draggable = false, showDate = false, nowMin = nu
   else if (t.duration) meta.push(h('span.meta', { title: 'Estimated duration' }, icon('clock', { size: 13 }), fmtDuration(t.duration)));
   if (cat) meta.push(h('span.cat', { style: { '--c': cat.color } }, cat.name));
   if (isRecurring(t)) meta.push(h('span.meta', { title: 'Repeats' }, icon('repeat', { size: 13 }), recurrenceLabel(t, weekdayLabels('short'))));
-  if (t.reminder !== null && t.time) meta.push(h('span.meta', { title: 'Reminder set' }, icon('bell', { size: 13 }), h('span.sr-only', 'Reminder set')));
+  if (t.reminder !== null && t.time) {
+    meta.push(canFire() ? h('span.meta', { title: 'Reminder set' }, icon('bell', { size: 13 }), h('span.sr-only', 'Reminder set')) : reminderWarnBadge());
+  }
   if (t.notes) meta.push(h('span.meta', { title: 'Has notes' }, icon('note', { size: 13 }), h('span.sr-only', 'Has notes')));
 
   let isNow = false;
