@@ -11,7 +11,8 @@ const SHORT_DAYS = { sun: 0, mon: 1, tue: 2, tues: 2, wed: 3, weds: 3, thu: 4, t
 const DAY_WORDS = [...Object.keys(FULL_DAYS), ...Object.keys(SHORT_DAYS)];
 const DATE_WORDS = ['today', 'tonight', 'tomorrow', 'tmrw', 'tmr', ...DAY_WORDS];
 const CONNECTOR = /\s(at|on|by|for|@)\s*$/i;
-const EVENING_WORDS = /\b(dinner|supper|drinks|movie|movies|party|night|bed|bedtime|sleep)\b/i;
+// Evening context for a bare "at N" (6–11). Bed/sleep only as phrases, so "Make bed at 8" stays morning.
+const EVENING_WORDS = /\b(dinner|supper|drinks|movies?|party|night|bedtime|to bed|go to sleep|sleep at)\b/i;
 const B = '(?=[\\s,.;:!?])'; // token boundary (the working string always ends with a space)
 
 export function parseQuick(input, today = todayKey(), opts = {}) {

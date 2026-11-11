@@ -1063,3 +1063,7 @@ input[type="date"].input, input[type="time"].input { min-width: 0; }
 body.ringing, body.bedside-open, body.scanner-open { overflow: hidden; }
 .ring-screen > *, .bed-center > *, .scan-bottom > * { flex-shrink: 0; }
 .ring-screen { justify-content: safe center; }
+.nowrap { white-space: nowrap; display: inline-flex; align-items: center; gap: 8px; }
+.ring-scan-note { flex-wrap: wrap; }
+.bed-wake { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
+.bed-retry { color: #c9cbd6; border: 1px solid rgba(255, 255, 255, .25); }

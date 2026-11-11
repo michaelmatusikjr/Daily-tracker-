@@ -102,6 +102,19 @@ export function openScanner({ title, hint, onCode, closable = true, manualEntry 
     h('div.scan-bottom', status, hint ? h('p.scan-hint', hint) : null, manual, extra));
   document.body.append(root);
   document.body.classList.add('scanner-open');
+  // Keep keyboard focus inside the scanner; Escape closes it when allowed.
+  const onKey = (e) => {
+    if (e.key === 'Escape' && closable) { e.preventDefault(); e.stopPropagation(); close(); return; }
+    if (e.key !== 'Tab') return;
+    const f = [...root.querySelectorAll('button, input')].filter((x) => !x.disabled && x.offsetParent !== null);
+    if (!f.length) { e.preventDefault(); return; }
+    const first = f[0], last = f[f.length - 1];
+    if (!root.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+    else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  };
+  document.addEventListener('keydown', onKey, true);
+  requestAnimationFrame(() => (closeBtn || root.querySelector('button, input'))?.focus());
   requestAnimationFrame(() => root.classList.add('show'));
 
   function showError(msg) {
@@ -151,6 +164,7 @@ export function openScanner({ title, hint, onCode, closable = true, manualEntry 
   function close() {
     if (stopped) return;
     stopped = true;
+    document.removeEventListener('keydown', onKey, true);
     clearTimeout(timer);
     stream?.getTracks().forEach((t) => t.stop());
     video.srcObject = null;

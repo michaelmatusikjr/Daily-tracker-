@@ -1,7 +1,7 @@
 // Persistent app state in localStorage with a versioned schema + migrations.
 import { todayKey, isValidKey } from './dates.js';
 
-export const APP_VERSION = '1.1.0';
+export const APP_VERSION = '1.1.1';
 export const SCHEMA_VERSION = 2;
 const STORAGE_KEY = 'dailyTracker:data';
 const ACCENT_IDS = ['indigo', 'teal', 'rose', 'amber', 'green', 'blue'];
@@ -192,7 +192,12 @@ export function normalize(data) {
   out.alarms = dedupeIds((Array.isArray(data.alarms) ? data.alarms : []).map(normAlarm).filter(Boolean)).slice(0, 50);
   out.codes = dedupeIds((Array.isArray(data.codes) ? data.codes : []).map(normCode).filter(Boolean)).slice(0, 20);
   const codeIds = new Set(out.codes.map((c) => c.id));
-  out.alarms.forEach((a) => { a.codeIds = a.codeIds.filter((id) => codeIds.has(id)); });
+  out.alarms.forEach((a) => {
+    const had = a.codeIds.length;
+    a.codeIds = a.codeIds.filter((id) => codeIds.has(id));
+    // Never widen "these codes" to "any code", and scan mode needs at least one code.
+    if (a.dismiss === 'scan' && (!out.codes.length || (had && !a.codeIds.length))) { a.dismiss = 'normal'; a.codeIds = []; }
+  });
   out.journal = {};
   if (isObj(data.journal)) {
     for (const [k, v] of Object.entries(data.journal)) {

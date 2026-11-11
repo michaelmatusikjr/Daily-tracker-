@@ -16,8 +16,8 @@ import { showOnboarding } from './onboarding.js';
 import { registerSW, onInstallChange } from './pwa.js';
 import { reschedule } from './notify.js';
 import { renderAlarms, openAlarmForm } from './views/alarms.js';
-import { startAlarmEngine, missedAlarms } from './alarms.js';
-import { showRingScreen } from './alarmScreens.js';
+import { startAlarmEngine, takeUnannouncedMissed } from './alarms.js';
+import { showRingScreen, hideRingScreen } from './alarmScreens.js';
 import { fmtTime } from './dates.js';
 
 const TABS = [
@@ -179,9 +179,11 @@ function init() {
   }
   startAlarmEngine({
     onRing: (item) => showRingScreen(item),
+    onEnd: () => hideRingScreen(),
     onChange: () => { const r = parseRoute().name; if ((r === 'alarms' || r === 'today') && !isSheetOpen()) render(); },
   });
-  const missed = missedAlarms();
+  // Announce each missed alarm once (they stay listed on the Alarms page until dismissed).
+  const missed = takeUnannouncedMissed();
   if (missed.length) {
     const m = missed[missed.length - 1];
     setTimeout(() => toast(`Missed alarm at ${fmtTime(m.time, getState().settings.timeFormat)} – the app wasn’t open`, {

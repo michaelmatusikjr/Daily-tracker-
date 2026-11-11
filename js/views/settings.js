@@ -164,7 +164,7 @@ async function importFile(input) {
     const text = await file.text();
     const next = validateImport(JSON.parse(text));
     const ok = await confirmDialog('Replace your data?',
-      `This backup has ${next.tasks.length} tasks and ${next.habits.length} habits. It will replace everything currently in the app.`, { ok: 'Import', danger: true });
+      `This backup has ${next.tasks.length} tasks, ${next.habits.length} habits, ${next.alarms.length} alarm${next.alarms.length === 1 ? '' : 's'} and ${next.codes.length} scan code${next.codes.length === 1 ? '' : 's'}. It will replace everything currently in the app.`, { ok: 'Import', danger: true });
     if (!ok) return;
     next.settings.onboarded = true;
     replaceState(next);

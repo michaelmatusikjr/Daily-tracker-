@@ -20,8 +20,7 @@ export function renderAlarms() {
     iconBtn('arrowLeft', 'Back to Today', () => ctx.go('today')),
     h('div.page-head-text',
       h('p.eyebrow', n ? `Next ${fmtTime(msToHHMM(n.at), fmt)} · ${untilLabel(n.at)}` : 'No alarm on'),
-      h('h1.page-title', 'Alarms')),
-    iconBtn('plus', 'New alarm', () => openAlarmForm(null), 'accent')));
+      h('h1.page-title', 'Alarms'))));
 
   for (const m of missedAlarms()) {
     root.append(h('div.card.missed-card', { role: 'alert' },
@@ -29,7 +28,7 @@ export function renderAlarms() {
       h('div.missed-text',
         h('b', `Missed alarm at ${fmtTime(m.time, fmt)}`),
         h('span', `${m.label ? m.label + ' · ' : ''}${new Date(m.at).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })} – the app wasn’t open.`)),
-      h('button.btn.small.secondary', { type: 'button', onclick: () => { clearMissed(); ctx.rerender(); } }, 'OK')));
+      h('button.btn.small.secondary', { type: 'button', 'aria-label': `Dismiss missed alarm at ${fmtTime(m.time, fmt)}`, onclick: () => { clearMissed(m); ctx.rerender(); } }, 'Dismiss')));
   }
 
   root.append(h('section.card.bedside-card',
@@ -110,16 +109,26 @@ const prettyFormat = (f) => {
 const maskValue = (v) => (v.length <= 8 ? v : `${v.slice(0, 4)}…${v.slice(-4)}`);
 
 async function deleteCode(c) {
-  const used = getState().alarms.filter((a) => a.dismiss === 'scan' && (a.codeIds.includes(c.id) || (!a.codeIds.length && getState().codes.length === 1)));
-  const msg = used.length ? `${used.length} scan-to-stop alarm${used.length === 1 ? '' : 's'} use this code. They will switch to normal Stop/Snooze if no code is left.` : 'You can register it again later.';
+  const st = getState();
+  const scanAlarms = st.alarms.filter((a) => a.dismiss === 'scan');
+  const lastCodeLeft = st.codes.length === 1;
+  // Alarms that would have no code left: locked only to this code, or "any code" when it's the last one.
+  const orphaned = scanAlarms.filter((a) => (a.codeIds.length && a.codeIds.every((id) => id === c.id)) || (!a.codeIds.length && lastCodeLeft));
+  const n = orphaned.length;
+  const msg = n
+    ? `${n} scan-to-stop alarm${n === 1 ? ' only uses' : 's only use'} this code and will switch to the normal Stop button.`
+    : 'You can register it again later.';
   if (!(await confirmDialog(`Delete “${c.nickname}”?`, msg, { ok: 'Delete', danger: true }))) return;
+  const orphanIds = new Set(orphaned.map((a) => a.id));
   update((s) => {
     s.codes = s.codes.filter((x) => x.id !== c.id);
     for (const a of s.alarms) {
+      // Keep alarms locked to the codes that remain – never widen to "any code".
       a.codeIds = a.codeIds.filter((x) => x !== c.id);
-      if (a.dismiss === 'scan' && !s.codes.length) a.dismiss = 'normal';
+      if (orphanIds.has(a.id)) { a.dismiss = 'normal'; a.codeIds = []; }
     }
   });
+  if (n) toast(`${n} alarm${n === 1 ? '' : 's'} switched to the Stop button`);
 }
 
 /** Scan (or type) a code and save it with a nickname. Calls done(code) on success. */
