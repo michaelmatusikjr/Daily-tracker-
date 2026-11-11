@@ -6,7 +6,6 @@ import { dayProgress, tasksOn, splitTasks, overdueTasks, activeHabits, isDueOn, 
 import { fmt as fmtDate, diffDays, addDays, todayKey, startOfWeek, fromKey, fmtDateLong, fmtDateShort, greeting, nowMin, timeToMin, fmtTime, weekdayNarrow, weekdayLabels } from '../dates.js';
 import { taskRow, habitControl, streakBadge, timeRange, reminderWarnBadge } from './widgets.js';
 import { canFire } from '../reminders.js';
-import { nextAlarm } from '../alarms.js';
 import { moveToToday, reorderTasks, setMood, setNote, bumpHabit } from '../actions.js';
 import { openQuickAdd } from '../forms.js';
 
@@ -22,13 +21,6 @@ function eyebrowLabel(k, today) {
   return k.slice(0, 4) !== today.slice(0, 4) ? `${rel} · ${k.slice(0, 4)}` : rel;
 }
 
-/** Small "⏰ 6:30 AM" link to the Alarms page (shows the next alarm, if any). */
-function alarmPill(fmt) {
-  const n = nextAlarm();
-  const label = n ? fmtTime(`${String(new Date(n.at).getHours()).padStart(2, '0')}:${String(new Date(n.at).getMinutes()).padStart(2, '0')}`, fmt) : 'Alarms';
-  return h(`a.alarm-pill${n ? '.on' : ''}`, { href: '#alarms', 'aria-label': n ? `Alarms. Next alarm ${label}` : 'Alarms' }, icon('alarm', { size: 14 }), label);
-}
-
 export function renderToday() {
   const st = getState();
   const k = ctx.ui.date;
@@ -41,7 +33,7 @@ export function renderToday() {
   // ---- Header ----
   root.append(h('header.page-head',
     h('div.page-head-text',
-      h('div.eyebrow-row', h('p.eyebrow', isToday ? greeting() : eyebrowLabel(k, today)), alarmPill(fmt)),
+      h('p.eyebrow', isToday ? greeting() : eyebrowLabel(k, today)),
       // With the "Today" chip showing, narrow screens get a short date (swapped in CSS).
       h('h1.page-title',
         h('span.title-long', fmtDateLong(k)),

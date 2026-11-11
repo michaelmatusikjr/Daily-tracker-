@@ -15,10 +15,6 @@ import { openQuickAdd, openHabitForm } from './forms.js';
 import { showOnboarding } from './onboarding.js';
 import { registerSW, onInstallChange } from './pwa.js';
 import { reschedule } from './notify.js';
-import { renderAlarms, openAlarmForm } from './views/alarms.js';
-import { startAlarmEngine, takeUnannouncedMissed } from './alarms.js';
-import { showRingScreen, hideRingScreen } from './alarmScreens.js';
-import { fmtTime } from './dates.js';
 
 const TABS = [
   { id: 'today', label: 'Today', icon: 'today' },
@@ -27,7 +23,7 @@ const TABS = [
   { id: 'stats', label: 'Stats', icon: 'stats' },
   { id: 'settings', label: 'Settings', icon: 'settings' },
 ];
-const TITLES = { today: 'Today', habits: 'Habits', habit: 'Habit', calendar: 'Calendar', stats: 'Stats', settings: 'Settings', alarms: 'Alarms' };
+const TITLES = { today: 'Today', habits: 'Habits', habit: 'Habit', calendar: 'Calendar', stats: 'Stats', settings: 'Settings' };
 
 const main = document.getElementById('main');
 const nav = document.getElementById('nav');
@@ -63,7 +59,6 @@ function render() {
     case 'calendar': view = renderCalendar(); break;
     case 'stats': view = renderStats(); break;
     case 'settings': view = renderSettings(); break;
-    case 'alarms': view = renderAlarms(); break;
     default: view = renderToday();
   }
   if (changedRoute) view.classList.add('enter');
@@ -71,13 +66,13 @@ function render() {
   if (failure) view.prepend(loadFailureCard(failure));
   main.replaceChildren(view);
   ctx.anim.clear();
-  const activeTab = name === 'habit' ? 'habits' : name === 'alarms' ? 'today' : name;
+  const activeTab = name === 'habit' ? 'habits' : name;
   nav.querySelectorAll('.nav-item').forEach((a) => {
     if (a.dataset.tab === activeTab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
   document.title = `${TITLES[name]} · Daily Tracker`;
   fab.hidden = name === 'settings';
-  fab.setAttribute('aria-label', name === 'habits' || name === 'habit' ? 'New habit' : name === 'alarms' ? 'New alarm' : 'Quick add');
+  fab.setAttribute('aria-label', name === 'habits' || name === 'habit' ? 'New habit' : 'Quick add');
   if (changedRoute) {
     window.scrollTo(0, 0);
     if (lastRoute !== null) main.focus({ preventScroll: true });
@@ -120,7 +115,7 @@ function rollover() {
 const fab = h('button.fab', { type: 'button', 'aria-label': 'Quick add', onclick: () => {
   if (isSheetOpen()) return; // ignore double-taps while a sheet is open
   const { name } = parseRoute();
-  if (name === 'habits' || name === 'habit') openHabitForm(null); else if (name === 'alarms') openAlarmForm(null); else openQuickAdd();
+  if (name === 'habits' || name === 'habit') openHabitForm(null); else openQuickAdd();
 } }, icon('plus', { size: 28 }));
 
 ctx.rerender = render;
@@ -177,19 +172,8 @@ function init() {
       action: 'Show', duration: 12000, onAction: () => window.scrollTo({ top: 0, behavior: 'smooth' }),
     }), 300);
   }
-  startAlarmEngine({
-    onRing: (item) => showRingScreen(item),
-    onEnd: () => hideRingScreen(),
-    onChange: () => { const r = parseRoute().name; if ((r === 'alarms' || r === 'today') && !isSheetOpen()) render(); },
-  });
-  // Announce each missed alarm once (they stay listed on the Alarms page until dismissed).
-  const missed = takeUnannouncedMissed();
-  if (missed.length) {
-    const m = missed[missed.length - 1];
-    setTimeout(() => toast(`Missed alarm at ${fmtTime(m.time, getState().settings.timeFormat)} – the app wasn’t open`, {
-      action: 'View', duration: 10000, onAction: () => ctx.go('alarms'),
-    }), 600);
-  }
+  // Alarms were removed in 1.2.0: drop their leftover runtime state.
+  try { localStorage.removeItem('dailyTracker:alarmRuntime'); } catch { /* ignore */ }
   if (!getState().settings.onboarded) showOnboarding();
   registerSW();
 }

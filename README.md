@@ -29,18 +29,6 @@ A calm, offline-first **daily planner + habit tracker** that runs entirely in yo
 - The detail screen has a GitHub-style year heatmap, 30-day and all-time completion rates, total completions, and an editable month calendar.
 - Archive, restore, reorder, and delete (with confirmation and undo).
 
-**Alarms** (⏰ pill in the Today header, “Alarm” in Quick add, or Settings › Alarms)
-- Time, label, repeat (once, weekdays, every day or any days), on/off toggle.
-- 4 tones synthesised with the Web Audio API (no audio files) with preview, “gradually louder”, vibration where supported (not iPhone).
-- Snooze 5/10/15 min with a maximum number of snoozes.
-- **Scan to stop** (Alarmy-style): register any QR code or product barcode with a nickname; the alarm keeps sounding until a registered code is scanned (a wrong code shakes and says “Not your code”). Snooze is optional per alarm. If the camera fails or the code is lost, hold **Emergency stop** for 3 s and solve 3 math problems.
-- Scanning uses the native `BarcodeDetector` where available (Chrome on Android) and otherwise lazy-loads the vendored ZXing decoder (`vendor/zxing`, @zxing/library 0.21.3, Apache-2.0) – QR, EAN-13/8, UPC-A/E, Code 128/39, ITF, Data Matrix. Rear camera preferred; the camera is released when the scanner closes.
-- **Bedside mode**: a dim full-screen clock with the next alarm that keeps the screen awake (Screen Wake Lock, re-acquired when you come back to the app).
-- Repeating alarms handle midnight and daylight-saving changes; one-time alarms switch themselves off after ringing.
-- If an alarm time passed while the app wasn’t running, you see “Missed alarm at 6:30” instead of a late ring (alarms up to 2 minutes late still ring).
-
-> **Honest limits:** a web app cannot ring while it is closed or the phone is locked – iOS and Android don’t allow it. Keep Daily Tracker open on **Bedside mode** (screen on, phone plugged in) for alarms to ring. A notification is also sent at alarm time on a best-effort basis if the app is in the background but still alive. Sound needs one tap first (arming an alarm or opening Bedside mode counts); on iOS 17+ playback is set to ignore the silent switch where supported.
-
 **Calendar**: a month grid that tints each day by habit completion and shows task dots and mood. Tap a day to open its agenda.
 
 **Stats**: overview cards, a 7/30-day completion bar chart (inline SVG), per-habit completion rates, and your best day of the week.
@@ -74,12 +62,7 @@ js/pwa.js               SW registration, update toast, install prompt
 js/theme.js             Theme and accent handling
 js/onboarding.js        First-run tour
 js/reminders.js         Reminder permission checks and help text
-js/alarms.js            Alarm engine (scheduling, snooze, missed alarms)
-js/alarmScreens.js      Ringing screen, emergency stop, Bedside mode, wake lock
-js/audio.js             Web Audio alarm tones and vibration
-js/scanner.js           Camera QR/barcode scanner (BarcodeDetector or ZXing)
-vendor/zxing/           @zxing/library 0.21.3 UMD build + license (lazy-loaded)
-js/views/*.js           Today, Habits, Habit detail, Calendar, Stats, Settings, Alarms
+js/views/*.js           Today, Habits, Habit detail, Calendar, Stats, Settings
 icons/                  SVG + PNG icons (192, 512, maskable 512, apple-touch 180)
 ```
 
@@ -93,7 +76,7 @@ python3 -m http.server 8080
 # open http://localhost:8080
 ```
 
-Service workers, the camera and wake lock are allowed on `localhost`. On other hosts they require HTTPS (GitHub Pages is HTTPS).
+Service workers are allowed on `localhost`. On other hosts they require HTTPS (GitHub Pages is HTTPS).
 
 ## Deploy to GitHub Pages
 
@@ -117,9 +100,8 @@ After the first load, the app works fully offline.
 
 When you set a reminder on a task or habit, the app makes sure it can actually appear: it asks for notification permission right then (and switches notifications on), or turns notifications on if you had switched them off. If notifications are blocked, the form explains how to allow them for your platform; on iPhone it explains that reminders need the app on the Home Screen. Reminders that can’t fire get a 🔕 badge, and Settings › Reminders summarises the situation. Turning notifications off while reminders exist asks for confirmation.
 
-
-There is no push server, so reminders are scheduled **while the app is open or was used recently**. They are shown as system notifications through the service worker. Browsers may suspend background pages, so a reminder is not guaranteed if the app was fully closed.
+There is no push server, so reminders are scheduled **while the app is open or was used recently**. They are shown as system notifications through the service worker. Browsers may suspend background pages, so a reminder is not guaranteed if the app was fully closed. For the same reason the app has no wake-up alarms: a web app can't ring while it's closed or the phone is locked.
 
 ## Your data
 
-Everything lives in `localStorage` on this device under the key `dailyTracker:data` (tasks, habits, journal, alarms and registered codes; alarm snooze/missed state is kept separately under `dailyTracker:alarmRuntime`). The schema is versioned (currently v2) and older data is migrated automatically. Use **Settings → Export JSON** for backups, or to move your data to another device with **Import JSON**.
+Everything lives in `localStorage` on this device under the key `dailyTracker:data` (tasks, habits, categories, journal and settings). The schema is versioned (currently v3) and older data, including backups from earlier versions, is migrated automatically. Use **Settings → Export JSON** for backups, or to move your data to another device with **Import JSON**.

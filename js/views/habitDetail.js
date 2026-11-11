@@ -4,7 +4,7 @@ import { getState } from '../store.js';
 import { ctx } from '../ctx.js';
 import { streaks, completionRate, totalCompletions, scheduleLabel, habitVal, habitTarget, isScheduled, habitStart } from '../logic.js';
 import { todayKey, addDays, startOfWeek, fromKey, fmtDateShort, fmtMonthYear, monthStart, addMonths, daysInMonth, weekdayLabels, fmt, fmtTime } from '../dates.js';
-import { habitControl, streakBadge } from './widgets.js';
+import { habitControl } from './widgets.js';
 import { setArchived, deleteHabit, toggleHabitDay } from '../actions.js';
 import { openHabitForm } from '../forms.js';
 

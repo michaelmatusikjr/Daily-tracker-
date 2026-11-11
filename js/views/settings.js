@@ -99,9 +99,7 @@ export function renderSettings() {
     })),
     notifOn ? h('div.set-actions', h('button.btn.secondary.small', {
       type: 'button', onclick: async () => { const ok = await showNotification('Daily Tracker', 'Notifications are working 👍', 'test'); if (!ok) toast('Could not show a notification'); },
-    }, icon('bell', { size: 16 }), 'Send test')) : null,
-    h('div.set-row', h('div.set-text', h('span.set-label', 'Alarms'), h('span.set-desc', 'Wake-up alarms, Bedside mode and scan-to-stop codes.')),
-      h('a.btn.secondary.small', { href: '#alarms' }, icon('alarm', { size: 16 }), 'Open'))));
+    }, icon('bell', { size: 16 }), 'Send test')) : null));
 
   // Install
   let installCtl;
@@ -164,7 +162,7 @@ async function importFile(input) {
     const text = await file.text();
     const next = validateImport(JSON.parse(text));
     const ok = await confirmDialog('Replace your data?',
-      `This backup has ${next.tasks.length} tasks, ${next.habits.length} habits, ${next.alarms.length} alarm${next.alarms.length === 1 ? '' : 's'} and ${next.codes.length} scan code${next.codes.length === 1 ? '' : 's'}. It will replace everything currently in the app.`, { ok: 'Import', danger: true });
+      `This backup has ${next.tasks.length} tasks and ${next.habits.length} habits. It will replace everything currently in the app.`, { ok: 'Import', danger: true });
     if (!ok) return;
     next.settings.onboarded = true;
     replaceState(next);

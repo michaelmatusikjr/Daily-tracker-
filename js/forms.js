@@ -7,7 +7,6 @@ import { parseQuick } from './parse.js';
 import { saveTask, deleteTask, saveHabit } from './actions.js';
 import { PRIORITIES } from './logic.js';
 import { reminderStatus, reminderProblem, ensureReminderPermission } from './reminders.js';
-import { openAlarmForm } from './views/alarms.js';
 import { closeAllSheets } from './ui.js';
 import { dow, fmtTime, fmtDuration, relativeLabel, weekdayLabels, isValidKey, todayKey } from './dates.js';
 
@@ -218,10 +217,8 @@ export function openQuickAdd() {
   const modeSwitch = segmented([
     { value: 'task', label: 'Task', icon: 'check' },
     { value: 'habit', label: 'Habit', icon: 'habits' },
-    { value: 'alarm', label: 'Alarm', icon: 'alarm' },
   ], 'task', (v) => {
     if (v === 'habit') { sheet.close(); openHabitForm(null); }
-    if (v === 'alarm') { sheet.close(); openAlarmForm(null); }
   }, { label: 'What to add' });
 
   const sheet = openSheet({ title: 'Quick add', content: [modeSwitch, form] });
