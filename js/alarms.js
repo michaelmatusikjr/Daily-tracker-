@@ -208,7 +208,7 @@ export function tick() {
     const sn = rt.snoozes[a.id];
     if (sn && sn.until <= now && sn.until > tabLastSeen) {
       if (now - sn.until <= GRACE_MS) due.push({ alarm: a, occ: sn.until, snoozed: true });
-      else { delete rt.snoozes[a.id]; changed = addMissed(rt, a, sn.until) || changed; }
+      else { delete rt.snoozes[a.id]; changed = addMissed(rt, a, sn.until) || changed; disableOnce(a.id); }
     }
   }
   // Drop snoozes of deleted alarms and stale ones nobody will ring.
