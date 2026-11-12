@@ -7,6 +7,8 @@ const RELOAD_KEY = 'dailyTracker:reloadedFor';
 /** Is the user in the middle of something (open sheet, or a field with typed text)? */
 function busy() {
   if (isSheetOpen()) return true;
+  // A name typed into the welcome tour counts even after focus moves to its buttons.
+  if (String(document.querySelector('.ob-name')?.value || '').trim()) return true;
   const el = document.activeElement;
   if (!el || el === document.body) return false;
   if (el.isContentEditable) return (el.textContent || '').trim() !== '';

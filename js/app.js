@@ -1,5 +1,5 @@
 // App bootstrap: routing, rendering, timers, PWA wiring.
-import { load, subscribe, getState, getLoadFailure, resolveLoadFailure, onSaveError, onSaveOk, getActiveProfile, handleStorageEvent, pendingLegacy, resolveLegacy, isStorageOk } from './store.js';
+import { load, subscribe, getState, getLoadFailure, resolveLoadFailure, onSaveError, onSaveOk, getActiveProfile, handleStorageEvent, pendingLegacy, resolveLegacy, legacyTargetProfile, isStorageOk } from './store.js';
 import { ctx } from './ctx.js';
 import { h, closeAllSheets, isSheetOpen, confirmDialog, toast, choose } from './ui.js';
 import { icon } from './icons.js';
@@ -118,7 +118,8 @@ const LEGACY_TITLE = 'Changes from an older version';
 async function offerLegacyMerge() {
   if (legacyOpen || !pendingLegacy()) return;
   legacyOpen = true;
-  const name = getActiveProfile()?.name || 'this profile';
+  const target = legacyTargetProfile();
+  const name = target?.name || 'this profile';
   const choice = await choose(LEGACY_TITLE,
     'Changes made in an older version of the app were found (probably a tab that was still open during the update). What should happen to them?', [
       { value: 'merge', label: `Merge into ${name}`, style: 'primary' },
@@ -128,7 +129,7 @@ async function offerLegacyMerge() {
   legacyOpen = false;
   if (!choice) return; // closed: ask again next time
   if (choice === 'discard' && !(await confirmDialog('Discard those changes?', 'They can’t be recovered afterwards.', { ok: 'Discard', danger: true }))) { offerLegacyMerge(); return; }
-  const res = resolveLegacy(choice);
+  const res = resolveLegacy(choice, target?.id);
   const msg = { Merged: `Merged into ${name}`, Added: 'Added as profile “Older version”', Discarded: 'Older changes discarded', Unreadable: 'Those changes couldn’t be read', 'Storage full': 'Couldn’t save – storage is full' }[res] || res;
   toast(msg, { force: true });
 }

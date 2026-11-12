@@ -2,7 +2,7 @@
 // Several profiles: an index key plus one data key per profile.
 import { todayKey, isValidKey } from './dates.js';
 
-export const APP_VERSION = '1.3.2';
+export const APP_VERSION = '1.3.3';
 export const SCHEMA_VERSION = 4;
 const LEGACY_KEY = 'dailyTracker:data'; // single-profile data before 1.3.0
 const PROFILES_KEY = 'dailyTracker:profiles';
@@ -743,7 +743,13 @@ export function mergeLegacyInto(cur, leg, since, base = null) {
 }
 
 /** action: 'merge' (into targetId), 'add' (new profile) or 'discard'. Returns a short result message. */
-export function resolveLegacy(action, targetId = index.activeId) {
+/** The profile older-version changes belong to: the one the old data was moved into, if it still exists. */
+export function legacyTargetProfile() {
+  const id = index.migratedLegacy?.profileId;
+  return index.profiles.find((p) => p.id === id) || getActiveProfile();
+}
+
+export function resolveLegacy(action, targetId = legacyTargetProfile()?.id) {
   const pending = pendingLegacy();
   if (!pending) return 'Nothing to do';
   const done = () => {
