@@ -4,6 +4,7 @@ import { ctx } from './ctx.js';
 import { toast, haptic, choose } from './ui.js';
 import { isRecurring, isTaskDone, habitTarget, habitVal, dayProgress } from './logic.js';
 import { todayKey } from './dates.js';
+import { syncHabitLink, computeRecords, exerciseById, workoutSummary } from './workouts.js';
 
 function celebrateIfDone(k, before, undo = null) {
   const after = dayProgress(getState(), k);
@@ -135,6 +136,8 @@ export function setHabitValue(id, k, v, { silentUndo = false } = {}) {
   update((s) => {
     s.logs[id] = s.logs[id] || {};
     if (value > 0) s.logs[id][k] = value; else delete s.logs[id][k];
+    // A manual change takes over from the workout link for that day.
+    if (s.autoHabit[id]) { delete s.autoHabit[id][k]; if (!Object.keys(s.autoHabit[id]).length) delete s.autoHabit[id]; }
   });
   const nowDone = value >= habitTarget(h);
   if (nowDone && !wasDone) {
@@ -179,8 +182,12 @@ export function saveHabit(data) {
   return id;
 }
 
+function unlinkWorkoutHabit(s, id) {
+  if (s.settings.workoutHabit?.habitId === id) s.settings.workoutHabit = { habitId: null, filter: 'any' };
+}
+
 export function setArchived(id, archived) {
-  update((s) => { const x = s.habits.find((y) => y.id === id); if (x) x.archived = archived; });
+  update((s) => { const x = s.habits.find((y) => y.id === id); if (x) x.archived = archived; if (archived) unlinkWorkoutHabit(s, id); });
   toast(archived ? 'Habit archived' : 'Habit restored', {
     action: 'Undo',
     onAction: () => update((s) => { const x = s.habits.find((y) => y.id === id); if (x) x.archived = !archived; }),
@@ -193,7 +200,7 @@ export function deleteHabit(id) {
   if (!habit) return;
   const snap = JSON.parse(JSON.stringify(habit));
   const logs = st.logs[id] ? { ...st.logs[id] } : null;
-  update((s) => { s.habits = s.habits.filter((x) => x.id !== id); delete s.logs[id]; });
+  update((s) => { s.habits = s.habits.filter((x) => x.id !== id); delete s.logs[id]; delete s.autoHabit[id]; unlinkWorkoutHabit(s, id); });
   toast(`Deleted “${habit.name}”`, {
     action: 'Undo',
     onAction: () => update((s) => { s.habits.push(snap); if (logs) s.logs[id] = logs; }),
@@ -238,4 +245,87 @@ export function seedExamples() {
       s.habits.push({ id: uid(), reminder: null, archived: false, createdAt: today, order: ++order, ...e });
     }
   });
+}
+
+// ---------- Workouts ----------
+/** Everything a workout save/delete can change, for an exact Undo (incl. the linked habit). */
+function workoutSnapshot(s) {
+  const hid = s.settings.workoutHabit?.habitId;
+  return JSON.parse(JSON.stringify({
+    workouts: s.workouts, exercises: s.exercises, hid,
+    logs: hid ? s.logs[hid] || null : null, auto: hid ? s.autoHabit[hid] || null : null,
+  }));
+}
+function restoreSnapshot(snap) {
+  update((s) => {
+    s.workouts = snap.workouts;
+    s.exercises = snap.exercises;
+    if (snap.hid) {
+      if (snap.logs) s.logs[snap.hid] = snap.logs; else delete s.logs[snap.hid];
+      if (snap.auto) s.autoHabit[snap.hid] = snap.auto; else delete s.autoHabit[snap.hid];
+    }
+  });
+}
+
+/**
+ * Save a workout (new or edited). `newExercise` = { name, type } creates the exercise first.
+ * Shows a toast with Undo, or a 🏆 toast when it sets a personal record.
+ */
+export function saveWorkout(data, { newExercise = null } = {}) {
+  const snap = workoutSnapshot(getState());
+  let id = data.id;
+  let exerciseId = data.exerciseId;
+  let oldDate = null;
+  update((s) => {
+    if (newExercise) {
+      exerciseId = uid();
+      s.exercises.push({ id: exerciseId, name: newExercise.name.slice(0, 60), type: newExercise.type === 'cardio' ? 'cardio' : 'strength', archived: false, createdAt: Date.now() });
+    }
+    const entry = { ...data, exerciseId };
+    const existing = id && s.workouts.find((w) => w.id === id);
+    if (existing) { oldDate = existing.date; Object.assign(existing, entry); } else {
+      id = uid();
+      s.workouts.push({ ...entry, id, createdAt: Date.now() });
+    }
+    syncHabitLink(s, entry.date);
+    if (oldDate && oldDate !== entry.date) syncHabitLink(s, oldDate);
+  });
+  const st = getState();
+  const w = st.workouts.find((x) => x.id === id);
+  const ex = exerciseById(st, exerciseId);
+  const labels = computeRecords(st, exerciseId).records.get(id);
+  const undo = { action: 'Undo', onAction: () => restoreSnapshot(snap) };
+  if (labels) {
+    ctx.anim.add('w-' + id);
+    haptic([20, 40, 20]);
+    toast(`🏆 New record! ${ex.name} · ${labels[0]}`, { ...undo, duration: 6000 });
+  } else {
+    toast(`${data.id ? 'Saved' : 'Logged'} ${ex.name} · ${workoutSummary(w, ex, st.settings)}`, undo);
+  }
+  return id;
+}
+
+export function deleteWorkout(id) {
+  const st = getState();
+  const w = st.workouts.find((x) => x.id === id);
+  if (!w) return;
+  const ex = exerciseById(st, w.exerciseId);
+  const snap = workoutSnapshot(st);
+  update((s) => { s.workouts = s.workouts.filter((x) => x.id !== id); syncHabitLink(s, w.date); });
+  toast(`Deleted ${ex?.name || 'workout'}`, { action: 'Undo', onAction: () => restoreSnapshot(snap) });
+}
+
+/** Delete an exercise and all of its workouts (Undo restores both). */
+export function deleteExercise(id) {
+  const st = getState();
+  const ex = exerciseById(st, id);
+  if (!ex) return;
+  const snap = workoutSnapshot(st);
+  const dates = [...new Set(st.workouts.filter((w) => w.exerciseId === id).map((w) => w.date))];
+  update((s) => {
+    s.exercises = s.exercises.filter((e) => e.id !== id);
+    s.workouts = s.workouts.filter((w) => w.exerciseId !== id);
+    dates.forEach((d) => syncHabitLink(s, d));
+  });
+  toast(`Deleted ${ex.name}`, { action: 'Undo', onAction: () => restoreSnapshot(snap) });
 }

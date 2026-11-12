@@ -1,6 +1,7 @@
-import { h, segmented, toast, confirmDialog, iconBtn } from '../ui.js';
+import { h, segmented, toast, confirmDialog, iconBtn, choose } from '../ui.js';
 import { icon } from '../icons.js';
-import { getState, update, replaceState, exportPayload, validateImport, defaultState, APP_VERSION, isStorageOk } from '../store.js';
+import { getState, update, replaceState, exportPayload, validateImport, defaultState, APP_VERSION, isStorageOk, getActiveProfile, getProfiles, addProfile, replaceAllProfiles } from '../store.js';
+import { avatarEl, openProfileEditor, openProfileMenu } from '../profiles.js';
 import { ctx } from '../ctx.js';
 import { ACCENTS } from '../theme.js';
 import { todayKey } from '../dates.js';
@@ -24,7 +25,18 @@ export function renderSettings() {
   const st = getState();
   const set = st.settings;
   const root = h('div.view.view-settings');
-  root.append(h('header.page-head', h('div.page-head-text', h('p.eyebrow', 'Make it yours'), h('h1.page-title', 'Settings'))));
+  const profile = getActiveProfile();
+  root.append(h('header.page-head.detail-head',
+    iconBtn('arrowLeft', 'Back to Today', () => ctx.go('today')),
+    h('div.page-head-text', h('p.eyebrow', `${profile.name}’s settings`), h('h1.page-title', 'Settings'))));
+
+  // Profile
+  root.append(group('Profile',
+    h('div.set-row',
+      h('div.profile-row', avatarEl(profile, 44), h('div.set-text', h('span.set-label', profile.name), h('span.set-desc', getProfiles().length > 1 ? `${getProfiles().length} profiles on this device. Settings below are ${profile.name}’s.` : 'Settings below belong to this profile.'))),
+      h('div.set-actions.tight',
+        h('button.btn.secondary.small', { type: 'button', onclick: () => openProfileEditor(profile) }, icon('edit', { size: 16 }), 'Edit'),
+        h('button.btn.ghost.small', { type: 'button', onclick: () => openProfileMenu() }, 'Switch')))));
 
   if (!isStorageOk()) {
     root.append(h('div.card.warn-card', icon('alert', { size: 18 }), 'Your browser is blocking storage, so changes may not be saved. Try leaving private browsing mode.'));
@@ -46,6 +58,25 @@ export function renderSettings() {
   root.append(group('Preferences',
     row('Week starts on', null, segmented([{ value: 1, label: 'Monday' }, { value: 0, label: 'Sunday' }], set.weekStart, (v) => setSetting('weekStart', v), { label: 'Week starts on', small: true })),
     row('Time format', null, segmented([{ value: '12', label: '12h' }, { value: '24', label: '24h' }], set.timeFormat, (v) => setSetting('timeFormat', v), { label: 'Time format', small: true }))));
+
+  // Workouts: units + optional habit link
+  const checkHabits = st.habits.filter((x) => !x.archived && x.goal.type === 'check');
+  const wh = set.workoutHabit || { habitId: null, filter: 'any' };
+  const linkedOk = checkHabits.some((x) => x.id === wh.habitId);
+  const habitSel = h('select.input', {
+    'aria-label': 'Habit to check off when you log a workout',
+    onchange: (e) => update((s) => { s.settings.workoutHabit = { habitId: e.target.value || null, filter: s.settings.workoutHabit?.filter || 'any' }; }),
+  }, h('option', { value: '', selected: !linkedOk }, 'None'), checkHabits.map((x) => h('option', { value: x.id, selected: x.id === wh.habitId }, `${x.emoji} ${x.name}`)));
+  root.append(group('Workouts',
+    row('Weight', null, segmented([{ value: 'lb', label: 'lbs' }, { value: 'kg', label: 'kg' }], set.weightUnit, (v) => setSetting('weightUnit', v), { label: 'Weight unit', small: true })),
+    row('Distance', null, segmented([{ value: 'mi', label: 'mi' }, { value: 'km', label: 'km' }], set.distanceUnit, (v) => setSetting('distanceUnit', v), { label: 'Distance unit', small: true })),
+    h('p.set-desc.pad', 'Each workout keeps the unit it was logged in; everything is shown converted to these units.'),
+    h('div.set-row.col',
+      h('div.set-text', h('span.set-label', 'Check off a habit when I log a workout'),
+        h('span.set-desc', checkHabits.length ? 'Optional. Logging a matching workout checks the habit for that day; removing the workout un-checks it unless you checked it yourself.' : 'Optional. Create a check-off habit (e.g. “Exercise”) to use this.')),
+      habitSel,
+      linkedOk ? segmented([{ value: 'any', label: 'Any workout' }, { value: 'strength', label: 'Strength' }, { value: 'cardio', label: 'Cardio' }], wh.filter,
+        (v) => update((s) => { s.settings.workoutHabit = { ...s.settings.workoutHabit, filter: v }; }), { label: 'Which workouts count', small: true }) : null)));
 
   // Categories
   const catInput = h('input.input', { type: 'text', placeholder: 'New category', maxlength: 40, 'aria-label': 'New category name' });
@@ -119,18 +150,19 @@ export function renderSettings() {
   // Data
   const fileInput = h('input', { type: 'file', accept: 'application/json,.json', hidden: true, onchange: () => importFile(fileInput) });
   root.append(group('Your data',
-    h('p.set-desc.pad', 'Everything is stored only on this device. Export a backup to move it or keep it safe.'),
+    h('p.set-desc.pad', 'Everything is stored only on this device. Export saves all profiles in one file.'),
     h('div.set-actions',
       h('button.btn.secondary', { type: 'button', onclick: exportData }, icon('download', { size: 18 }), 'Export JSON'),
       h('button.btn.secondary', { type: 'button', onclick: () => fileInput.click() }, icon('upload', { size: 18 }), 'Import JSON'),
       fileInput),
     h('div.set-actions',
       h('button.btn.ghost', { type: 'button', onclick: () => showOnboarding() }, icon('sparkles', { size: 18 }), 'Show welcome tour'),
-      h('button.btn.danger-ghost', { type: 'button', onclick: resetAll }, icon('trash', { size: 18 }), 'Reset all data'))));
+      h('button.btn.danger-ghost', { type: 'button', onclick: resetAll }, icon('trash', { size: 18 }), `Reset ${profile.name}’s data`))));
 
   root.append(h('footer.about',
     h('p', h('b', 'Daily Tracker'), ` · version ${APP_VERSION}`),
-    h('p.muted.small', 'Works offline · No account · No tracking')));
+    h('p.muted.small', 'Works offline · No account · No tracking'),
+    h('p.muted.small', 'Profiles are for convenience and aren’t private from each other.')));
   return root;
 }
 
@@ -157,27 +189,46 @@ async function importFile(input) {
   const file = input.files?.[0];
   input.value = '';
   if (!file) return;
-  if (file.size > 10 * 1024 * 1024) { toast('That file is too large'); return; }
+  if (file.size > 20 * 1024 * 1024) { toast('That file is too large'); return; }
   try {
-    const text = await file.text();
-    const next = validateImport(JSON.parse(text));
-    const ok = await confirmDialog('Replace your data?',
-      `This backup has ${next.tasks.length} tasks and ${next.habits.length} habits. It will replace everything currently in the app.`, { ok: 'Import', danger: true });
-    if (!ok) return;
-    next.settings.onboarded = true;
-    replaceState(next);
-    toast('Backup imported');
+    const parsed = validateImport(JSON.parse(await file.text()));
+    const counts = (d) => `${d.tasks.length} tasks, ${d.habits.length} habits and ${d.workouts.length} workouts`;
+    if (parsed.kind === 'multi') {
+      const names = parsed.profiles.map((p) => p.name).join(', ');
+      const ok = await confirmDialog('Replace everything?',
+        `This backup has ${parsed.profiles.length} profile${parsed.profiles.length === 1 ? '' : 's'} (${names}). It will replace all profiles and data on this device.`, { ok: 'Replace all', danger: true });
+      if (!ok) return;
+      parsed.profiles.forEach((p) => { p.data.settings.onboarded = true; });
+      if (!replaceAllProfiles(parsed)) { toast('Couldn’t import – this device’s storage is full'); return; }
+      toast('Backup imported');
+      return;
+    }
+    // Older single-profile backup: replace the current profile or add it as a new one.
+    const data = parsed.data;
+    data.settings.onboarded = true;
+    const profile = getActiveProfile();
+    const choice = await choose('Import backup', `This backup has ${counts(data)}.`, [
+      { value: 'add', label: 'Add as new profile', style: 'primary' },
+      { value: 'replace', label: `Replace ${profile.name}’s data`, style: 'danger' },
+      { value: null, label: 'Cancel', style: 'ghost' },
+    ]);
+    if (choice === 'replace') { replaceState(data); toast('Backup imported'); }
+    if (choice === 'add') {
+      if (addProfile({ name: 'Imported', data })) toast('Backup added as profile “Imported” – rename it from the profile menu');
+      else toast('Couldn’t import – this device’s storage is full');
+    }
   } catch (e) {
     toast(e instanceof SyntaxError ? 'That file is not valid JSON' : (e.message || 'Import failed'), { duration: 6000 });
   }
 }
 
 async function resetAll() {
-  if (!(await confirmDialog('Reset all data?', 'This deletes every task, habit and journal entry on this device.', { ok: 'Yes, continue', danger: true }))) return;
+  const name = getActiveProfile().name;
+  if (!(await confirmDialog(`Reset ${name}’s data?`, `This deletes ${name}’s tasks, habits, workouts and journal on this device. Other profiles are kept.`, { ok: 'Yes, continue', danger: true }))) return;
   if (!(await confirmDialog('Are you absolutely sure?', 'This cannot be undone. Consider exporting a backup first.', { ok: 'Delete everything', danger: true }))) return;
   const fresh = defaultState();
-  fresh.settings = { ...getState().settings, onboarded: true, notifications: false };
+  fresh.settings = { ...getState().settings, onboarded: true, notifications: false, workoutHabit: { habitId: null, filter: 'any' } };
   replaceState(fresh);
   ctx.setDate(todayKey());
-  toast('All data was reset');
+  toast(`${name}’s data was reset`);
 }

@@ -6,6 +6,7 @@ import { ctx } from './ctx.js';
 import { parseQuick } from './parse.js';
 import { saveTask, deleteTask, saveHabit } from './actions.js';
 import { PRIORITIES } from './logic.js';
+import { openWorkoutForm } from './workoutForm.js';
 import { reminderStatus, reminderProblem, ensureReminderPermission } from './reminders.js';
 import { closeAllSheets } from './ui.js';
 import { dow, fmtTime, fmtDuration, relativeLabel, weekdayLabels, isValidKey, todayKey } from './dates.js';
@@ -217,8 +218,10 @@ export function openQuickAdd() {
   const modeSwitch = segmented([
     { value: 'task', label: 'Task', icon: 'check' },
     { value: 'habit', label: 'Habit', icon: 'habits' },
+    { value: 'workout', label: 'Workout', icon: 'dumbbell' },
   ], 'task', (v) => {
     if (v === 'habit') { sheet.close(); openHabitForm(null); }
+    if (v === 'workout') { sheet.close(); openWorkoutForm(null); }
   }, { label: 'What to add' });
 
   const sheet = openSheet({ title: 'Quick add', content: [modeSwitch, form] });
@@ -275,9 +278,9 @@ export function openTaskForm(task, defaults = {}) {
       type: 'button', role: 'radio', 'aria-checked': String(category === id), style: color ? { '--c': color } : null,
       onclick: () => { category = id; renderCats(); },
     }, color ? h('span.dot', { style: { background: color } }) : null, name);
-    catWrap.replaceChildren(mk(null, 'None', null), ...cats.map((c) => mk(c.id, c.name, c.color)),
+    catWrap.replaceChildren(...[mk(null, 'None', null), ...cats.map((c) => mk(c.id, c.name, c.color)),
       pendingCat ? mk('__new', pendingCat + ' (new)', 'var(--accent)') : null,
-      h('button.chip.add', { type: 'button', onclick: addCat, 'aria-label': 'New category' }, icon('plus', { size: 14 }), 'New'));
+      h('button.chip.add', { type: 'button', onclick: addCat, 'aria-label': 'New category' }, icon('plus', { size: 14 }), 'New')].filter(Boolean));
   }
   function addCat() {
     const inp = h('input.input.cat-new', { type: 'text', maxlength: 40, placeholder: 'Category name', 'aria-label': 'New category name' });

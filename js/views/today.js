@@ -1,6 +1,7 @@
 import { h, iconBtn, ring, onSwipe, makeSortable, emptyState, sectionHead } from '../ui.js';
 import { icon } from '../icons.js';
-import { getState } from '../store.js';
+import { getState, getActiveProfile } from '../store.js';
+import { avatarEl, openProfileMenu } from '../profiles.js';
 import { ctx } from '../ctx.js';
 import { dayProgress, tasksOn, splitTasks, overdueTasks, activeHabits, isDueOn, habitStart, streaks, habitVal, habitTarget, MOODS, weekCount } from '../logic.js';
 import { fmt as fmtDate, diffDays, addDays, todayKey, startOfWeek, fromKey, fmtDateLong, fmtDateShort, greeting, nowMin, timeToMin, fmtTime, weekdayNarrow, weekdayLabels } from '../dates.js';
@@ -31,9 +32,13 @@ export function renderToday() {
   const root = h('div.view.view-today');
 
   // ---- Header ----
-  root.append(h('header.page-head',
+  const profile = getActiveProfile();
+  root.append(h('header.page-head.today-head',
     h('div.page-head-text',
-      h('p.eyebrow', isToday ? greeting() : eyebrowLabel(k, today)),
+      // Avatar sits top-left beside the greeting, so the date title keeps the full width.
+      h('div.eyebrow-row',
+        h('button.avatar-btn', { type: 'button', onclick: () => openProfileMenu(), 'aria-label': `Profile: ${profile.name}. Switch profile or open settings` }, avatarEl(profile, 34)),
+        h('p.eyebrow', isToday ? greeting() : eyebrowLabel(k, today))),
       // With the "Today" chip showing, narrow screens get a short date (swapped in CSS).
       h('h1.page-title',
         h('span.title-long', fmtDateLong(k)),

@@ -1,5 +1,6 @@
 import { h, iconBtn, onSwipe } from '../ui.js';
 import { getState } from '../store.js';
+import { hasWorkoutOn } from '../workouts.js';
 import { ctx } from '../ctx.js';
 import { dayProgress, tasksOn, isTaskDone, moodEmoji, PRIORITIES } from '../logic.js';
 import { todayKey, addDays, addMonths, startOfWeek, monthStart, daysInMonth, fmtMonthYear, fmtDateLong, weekdayLabels } from '../dates.js';
@@ -32,6 +33,7 @@ export function renderCalendar() {
     const p = dayProgress(st, k);
     const tasks = tasksOn(st, k);
     const mood = st.journal[k]?.mood;
+    const worked = hasWorkoutOn(st, k);
     if (inMonth && k <= today) { monthTasks += p.total; monthDone += p.done; }
     if (inMonth && st.journal[k]) moodDays++;
     const intensity = k <= today && p.habits.total ? p.habits.pct : 0;
@@ -39,13 +41,14 @@ export function renderCalendar() {
       const cat = t.category && st.categories.find((c) => c.id === t.category);
       return h(`span.cal-dot${isTaskDone(t, k) ? '.done' : ''}`, { style: { background: cat ? cat.color : t.priority ? PRIORITIES[t.priority].color : 'var(--accent)' } });
     });
-    const label = `${fmtDateLong(k)}. ${tasks.length} task${tasks.length === 1 ? '' : 's'}${p.habits.total ? `, ${p.habits.done} of ${p.habits.total} habits done` : ''}${mood ? ', mood ' + ['awful', 'bad', 'okay', 'good', 'great'][mood - 1] : ''}`;
+    const label = `${fmtDateLong(k)}. ${tasks.length} task${tasks.length === 1 ? '' : 's'}${p.habits.total ? `, ${p.habits.done} of ${p.habits.total} habits done` : ''}${mood ? ', mood ' + ['awful', 'bad', 'okay', 'good', 'great'][mood - 1] : ''}${worked ? ', workout logged' : ''}`;
     grid.append(h(`button.cal-day${inMonth ? '' : '.outside'}${k === today ? '.today' : ''}${k === ctx.ui.date ? '.selected' : ''}${p.total && p.pct === 1 && k <= today ? '.perfect' : ''}`, {
       type: 'button', 'aria-label': label, style: { '--i': intensity.toFixed(2) },
       onclick: () => { ctx.setDate(k); ctx.go('today'); },
     },
     h('span.cal-num', String(Number(k.slice(8)))),
     mood ? h('span.cal-mood', { 'aria-hidden': 'true' }, moodEmoji(mood)) : null,
+    worked ? h('span.cal-workout', { 'aria-hidden': 'true' }, '💪') : null,
     tasks.length ? h('span.cal-dots', { 'aria-hidden': 'true' }, dots, tasks.length > 3 ? h('span.cal-more', '+') : null) : null));
   }
   const card = h('section.card.cal-card.no-swipe', grid);
@@ -55,7 +58,8 @@ export function renderCalendar() {
   root.append(h('div.cal-legend', { 'aria-hidden': 'true' },
     h('span', h('i.lg-swatch'), 'Habit completion'),
     h('span', h('i.lg-dot'), 'Task'),
-    h('span', '🙂 Mood')));
+    h('span', '🙂 Mood'),
+    h('span', '💪 Workout')));
 
   root.append(h('section.stat-grid.three',
     h('div.stat-card', h('span.stat-value', String(monthDone)), h('span.stat-label', 'Items completed')),

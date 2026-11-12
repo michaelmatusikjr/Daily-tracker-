@@ -1,5 +1,7 @@
 import { h, s, segmented } from '../ui.js';
 import { getState } from '../store.js';
+import { periodStats, recentRecords, exerciseById, fmtLong, trimNum, distLabel } from '../workouts.js';
+import { icon } from '../icons.js';
 import { ctx } from '../ctx.js';
 import { dayProgress, activeHabits, streaks, completionRate, totalCompletions, habitStart } from '../logic.js';
 import { todayKey, addDays, startOfWeek, fmtDateShort, weekdayNarrow, weekdayLabels, fromKey } from '../dates.js';
@@ -88,6 +90,7 @@ export function renderStats() {
       h('div.rate-bar', { role: 'img', 'aria-label': `${names[d]}: ${pctStr(v)}` }, h('span', { style: { width: `${Math.round((v || 0) * 100)}%` } })),
       h('span.rate-val', pctStr(v)))))));
 
+  root.append(workoutSection(st));
   void habitStart;
   return root;
 }
@@ -129,4 +132,40 @@ function barChart(days, range) {
     }
   });
   return svg;
+}
+
+/** Workouts: days this week/month, strength vs cardio split, cardio totals, recent records, charts. */
+function workoutSection(st) {
+  const sec = h('section.section.stats-workouts', h('div.section-head', h('h2.section-title', '💪 Workouts'), h('a.link-btn', { href: '#workouts' }, 'All workouts')));
+  if (!st.workouts.length) {
+    sec.append(h('div.card', h('p.muted', 'No workouts logged yet. ', h('a.link-btn.inline', { href: '#workouts' }, 'Log your first workout'))));
+    return sec;
+  }
+  const ps = periodStats(st);
+  const s = st.settings;
+  sec.append(h('div.stat-grid',
+    tile(String(ps.week), 'Workout days', 'This week'),
+    tile(String(ps.month), 'Workout days', 'This month'),
+    tile(ps.cardioTime ? fmtLong(ps.cardioTime) : '—', 'Cardio time', 'This month'),
+    tile(ps.cardioDist ? `${trimNum(ps.cardioDist, 1)} ${distLabel(s.distanceUnit)}` : '—', 'Cardio distance', 'This month')));
+  const total = ps.strength + ps.cardio;
+  if (total) {
+    const sp = Math.round((ps.strength / total) * 100);
+    sec.append(h('div.card',
+      h('div.section-head', h('h2.section-title', 'Strength vs cardio'), h('span.muted.small', 'This month')),
+      h('div.split-bar', { role: 'img', 'aria-label': `${ps.strength} strength and ${ps.cardio} cardio entries this month` },
+        h('span.split-s', { style: { width: sp + '%' } }), h('span.split-c', { style: { width: 100 - sp + '%' } })),
+      h('div.split-legend', h('span', h('i.lg-s'), `Strength ${ps.strength}`), h('span', h('i.lg-c'), `Cardio ${ps.cardio}`))));
+  }
+  const prs = recentRecords(st, 5);
+  if (prs.length) {
+    sec.append(h('div.card', h('div.section-head', h('h2.section-title', '🏆 Recent records')),
+      h('ul.pr-list', prs.map(({ w, ex, labels }) => h('li', h('a.pr-item', { href: '#exercise/' + encodeURIComponent(ex.id) },
+        h('b', ex.name), h('span', labels.join(' · ')), h('small', fmtDateShort(w.date))))))));
+  }
+  const used = [...new Set(st.workouts.map((w) => w.exerciseId))].map((id) => exerciseById(st, id)).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
+  sec.append(h('div.card', h('div.section-head', h('h2.section-title', 'Progress charts')),
+    h('ul.ex-links', used.map((ex) => h('li', h('a.ex-link-row', { href: '#exercise/' + encodeURIComponent(ex.id) },
+      icon(ex.type === 'cardio' ? 'run' : 'dumbbell', { size: 18 }), h('span', ex.name), icon('chevronRight', { size: 16 })))))));
+  return sec;
 }

@@ -10,6 +10,9 @@ export const ctx = {
     showArchived: false,
     statsRange: 7,
     journalOpen: null,
+    workoutFilter: 'all',
+    workoutDays: 30,
+    exChart: 'primary',
   },
   /** ids of elements that should play a "just changed" animation on next render */
   anim: new Set(),

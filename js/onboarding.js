@@ -1,14 +1,17 @@
 // First-run welcome tour: swipeable cards (scroll-snap), skippable.
 import { h } from './ui.js';
 import { icon } from './icons.js';
-import { update, getState } from './store.js';
+import { update, getState, getActiveProfile, updateProfile } from './store.js';
 import { seedExamples } from './actions.js';
 
 export function showOnboarding() {
   if (document.querySelector('.onboarding')) return;
   const prevFocus = document.activeElement;
   // On a replay of the tour, don't add examples again unless asked.
-  let seed = !getState().settings.onboarded;
+  const firstRun = !getState().settings.onboarded;
+  let seed = firstRun;
+  // New users name their profile right here (optional; defaults to "Me").
+  const nameInput = firstRun ? h('input.input.ob-name', { type: 'text', maxlength: 40, placeholder: 'Your name (optional)', autocomplete: 'given-name', 'aria-label': 'Your name' }) : null;
   const slides = [
     { art: '🗓️', title: 'Plan your day in seconds', text: 'Tap + and just type. “Gym 6pm” or “Call mom tomorrow 14:30” lands at the right time automatically.' },
     { art: '🔥', title: 'Build habits that stick', text: 'One tap to check off. Count goals like 8 glasses of water. Streaks respect your schedule, so rest days never break them.' },
@@ -21,6 +24,7 @@ export function showOnboarding() {
       h('div.ob-art', { 'aria-hidden': 'true' }, sl.art),
       h('h2.ob-title', sl.title),
       h('p.ob-text', sl.text),
+      sl.last && nameInput ? h('label.ob-name-label', h('span', 'What should we call you?'), nameInput) : null,
       sl.last ? h('label.ob-check',
         h('input', { type: 'checkbox', checked: seed, onchange: (e) => { seed = e.target.checked; } }),
         h('span', 'Add a few example habits to start')) : null));
@@ -66,6 +70,8 @@ export function showOnboarding() {
     document.removeEventListener('keydown', onKey);
     root.classList.remove('show');
     setTimeout(() => root.remove(), 250);
+    const name = nameInput?.value.trim();
+    if (name) updateProfile(getActiveProfile().id, { name });
     update((s) => { s.settings.onboarded = true; });
     if (completed && seed) seedExamples();
     if (prevFocus && document.contains(prevFocus)) prevFocus.focus?.();

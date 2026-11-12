@@ -1,5 +1,5 @@
 // App bootstrap: routing, rendering, timers, PWA wiring.
-import { load, subscribe, getState, getLoadFailure, resolveLoadFailure } from './store.js';
+import { load, subscribe, getState, getLoadFailure, resolveLoadFailure, onSaveError, getActiveProfile } from './store.js';
 import { ctx } from './ctx.js';
 import { h, closeAllSheets, isSheetOpen, confirmDialog, toast } from './ui.js';
 import { icon } from './icons.js';
@@ -15,15 +15,19 @@ import { openQuickAdd, openHabitForm } from './forms.js';
 import { showOnboarding } from './onboarding.js';
 import { registerSW, onInstallChange } from './pwa.js';
 import { reschedule } from './notify.js';
+import { renderWorkouts, renderExercise } from './views/workouts.js';
+import { openWorkoutForm } from './workoutForm.js';
+import { openProfileEditor } from './profiles.js';
 
 const TABS = [
   { id: 'today', label: 'Today', icon: 'today' },
   { id: 'habits', label: 'Habits', icon: 'habits' },
+  { id: 'workouts', label: 'Workouts', icon: 'dumbbell' },
   { id: 'calendar', label: 'Calendar', icon: 'calendar' },
   { id: 'stats', label: 'Stats', icon: 'stats' },
-  { id: 'settings', label: 'Settings', icon: 'settings' },
 ];
-const TITLES = { today: 'Today', habits: 'Habits', habit: 'Habit', calendar: 'Calendar', stats: 'Stats', settings: 'Settings' };
+// Settings has no tab: it opens from the profile menu (avatar on Today) or #settings.
+const TITLES = { today: 'Today', habits: 'Habits', habit: 'Habit', workouts: 'Workouts', exercise: 'Exercise', calendar: 'Calendar', stats: 'Stats', settings: 'Settings' };
 
 const main = document.getElementById('main');
 const nav = document.getElementById('nav');
@@ -59,6 +63,8 @@ function render() {
     case 'calendar': view = renderCalendar(); break;
     case 'stats': view = renderStats(); break;
     case 'settings': view = renderSettings(); break;
+    case 'workouts': view = renderWorkouts(); break;
+    case 'exercise': view = renderExercise(arg); break;
     default: view = renderToday();
   }
   if (changedRoute) view.classList.add('enter');
@@ -66,13 +72,13 @@ function render() {
   if (failure) view.prepend(loadFailureCard(failure));
   main.replaceChildren(view);
   ctx.anim.clear();
-  const activeTab = name === 'habit' ? 'habits' : name;
+  const activeTab = name === 'habit' ? 'habits' : name === 'exercise' ? 'workouts' : name;
   nav.querySelectorAll('.nav-item').forEach((a) => {
     if (a.dataset.tab === activeTab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
   document.title = `${TITLES[name]} · Daily Tracker`;
   fab.hidden = name === 'settings';
-  fab.setAttribute('aria-label', name === 'habits' || name === 'habit' ? 'New habit' : 'Quick add');
+  fab.setAttribute('aria-label', name === 'habits' || name === 'habit' ? 'New habit' : name === 'workouts' || name === 'exercise' ? 'Log workout' : 'Quick add');
   if (changedRoute) {
     window.scrollTo(0, 0);
     if (lastRoute !== null) main.focus({ preventScroll: true });
@@ -115,7 +121,10 @@ function rollover() {
 const fab = h('button.fab', { type: 'button', 'aria-label': 'Quick add', onclick: () => {
   if (isSheetOpen()) return; // ignore double-taps while a sheet is open
   const { name } = parseRoute();
-  if (name === 'habits' || name === 'habit') openHabitForm(null); else openQuickAdd();
+  if (name === 'habits' || name === 'habit') openHabitForm(null);
+  else if (name === 'workouts') openWorkoutForm(null);
+  else if (name === 'exercise') openWorkoutForm(null, { exerciseId: parseRoute().arg });
+  else openQuickAdd();
 } }, icon('plus', { size: 28 }));
 
 ctx.rerender = render;
@@ -132,9 +141,15 @@ function init() {
   render();
   let lastSettings = JSON.stringify(getState().settings);
   let scheduleTimer;
-  subscribe((st) => {
+  subscribe((st, info = {}) => {
     const sNow = JSON.stringify(st.settings);
     if (sNow !== lastSettings) { applyTheme(st.settings); lastSettings = sNow; }
+    if (info.profileSwitched) {
+      // Fresh view state for the other person.
+      closeAllSheets();
+      Object.assign(ctx.ui, { date: todayKey(), calMonth: monthStart(todayKey()), detailMonth: null, habitsReorder: false, showArchived: false, journalOpen: null, workoutFilter: 'all', workoutDays: 30 });
+      applyTheme(st.settings); lastSettings = sNow;
+    }
     render();
     clearTimeout(scheduleTimer);
     scheduleTimer = setTimeout(reschedule, 300);
@@ -174,7 +189,15 @@ function init() {
   }
   // Alarms were removed in 1.2.0: drop their leftover runtime state.
   try { localStorage.removeItem('dailyTracker:alarmRuntime'); } catch { /* ignore */ }
+  // Saving can fail when the device's storage is full (e.g. many profile photos).
+  let lastSaveErr = 0;
+  onSaveError(() => {
+    if (Date.now() - lastSaveErr < 8000) return;
+    lastSaveErr = Date.now();
+    toast('Couldn’t save – this device’s storage is full. Export a backup, then remove photos or old data.', { duration: 8000 });
+  });
   if (!getState().settings.onboarded) showOnboarding();
+  else if (getActiveProfile()?.introPending) setTimeout(() => openProfileEditor(getActiveProfile(), { intro: true }), 400);
   registerSW();
 }
 

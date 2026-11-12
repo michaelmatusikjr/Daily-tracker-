@@ -29,14 +29,30 @@ A calm, offline-first **daily planner + habit tracker** that runs entirely in yo
 - The detail screen has a GitHub-style year heatmap, 30-day and all-time completion rates, total completions, and an editable month calendar.
 - Archive, restore, reorder, and delete (with confirmation and undo).
 
+**Workouts** (Workouts tab, or + → Workout)
+- Log any exercise you define yourself. Each exercise is **Strength** (weight, sets, reps, plus an optional time box for holds like planks) or **Cardio** (time and distance). Every field is optional, but at least one must be filled; bodyweight work just leaves weight empty.
+- Strength entries can have several lines (e.g. 225 × 3×5, then 245 × 1×3).
+- Fast repeat logging: recent and most-used exercises appear as big chips; picking one pre-fills last time's values (“Last time: 225 lbs · 3×5 · Nov 10”), so a repeat is pick → Save. Steppers: ±5 lb / ±2.5 kg, ±1 set/rep. Time: cardio takes minutes or h:mm; strength takes seconds or m:ss.
+- Typing a new name offers “Add ‘Squats’” with a Strength/Cardio choice. Manage exercises (rename, change type, archive, delete — delete with history offers archive instead) from the list icon on the Workouts tab.
+- 🏆 personal records (heaviest weight, most reps at a weight, longest time; longest distance, longest time, fastest pace for cardio) are computed from the history, so they stay correct after edits and deletes. A new record gets a celebratory toast.
+- History grouped by day with filters (All / Strength / Cardio / one exercise); each exercise has a detail page with records, totals and an inline-SVG progress chart (top weight per day, or distance/pace/time for cardio).
+- **Units:** lbs/kg and mi/km per profile (default lbs/mi). Each workout stores the values and the unit it was logged in; everything is displayed converted to the current setting (weights rounded to 0.5, distances to 0.01), so switching units never changes history.
+- Calendar shows 💪 on workout days; Stats has a Workouts section (workout days this week/month, strength vs cardio split, cardio time and distance, recent records, links to each exercise's chart).
+- Optional: Settings › Workouts › “Check off a habit when I log a workout” (Any / Strength only / Cardio only). Only check-off habits can be linked. A matching workout checks the habit for that day (past days too, never future); removing the last matching workout un-checks it only if the link checked it — manual checks are never touched. Undo restores both.
+
+**Profiles** (avatar at the top-left of Today)
+- Several people can share one device. Tap the avatar to switch profiles, add one, edit name/avatar (photo — cropped and resized to 192 px on the device — or emoji/initials on a colour), open Settings, or delete a profile (double confirmation; the last profile can't be deleted).
+- Each profile has completely separate data and settings (tasks, habits, journal, categories, workouts, theme, accent, units, notification preference…). Reminders fire for every profile and are prefixed with the profile's name when there is more than one.
+- Profiles are a convenience, **not a lock**: anyone with the device can open any profile.
+
 **Calendar**: a month grid that tints each day by habit completion and shows task dots and mood. Tap a day to open its agenda.
 
 **Stats**: overview cards, a 7/30-day completion bar chart (inline SVG), per-habit completion rates, and your best day of the week.
 
-**Settings**: theme (auto/light/dark), 6 accent colours, week start (Mon/Sun), 12h/24h time, task categories, notifications, install button (or iOS instructions), JSON export/import with validation, reset (asks twice), the welcome tour again, and the app version.
+**Settings** (profile menu › Settings, or `#settings`): theme (auto/light/dark), 6 accent colours, week start (Mon/Sun), 12h/24h time, workout units and the optional habit link, task categories, notifications, install button (or iOS instructions), JSON export/import with validation, reset this profile (asks twice), the welcome tour again, and the app version.
 
 **Quality**
-- Mobile-first with thumb-friendly 44px targets, a bottom tab bar on phones and a side nav on wide screens, bottom sheets, and safe-area insets for notches.
+- Mobile-first with thumb-friendly 44px targets, a bottom tab bar (Today, Habits, Workouts, Calendar, Stats) on phones and a side nav on wide screens, bottom sheets, and safe-area insets for notches.
 - Semantic buttons, ARIA labels, visible focus, focus trapping in sheets, and `prefers-reduced-motion` support.
 - All user text is rendered with `textContent`, never `innerHTML`.
 - Date keys are built from local date parts (`YYYY-MM-DD`) and use noon-anchored arithmetic, so DST changes are safe.
@@ -60,9 +76,12 @@ js/ui.js                DOM helpers, sheets, toasts, gestures, drag-sort
 js/notify.js            In-app reminders
 js/pwa.js               SW registration, update toast, install prompt
 js/theme.js             Theme and accent handling
-js/onboarding.js        First-run tour
+js/onboarding.js        First-run tour (includes the profile name for new users)
+js/profiles.js          Avatar, profile menu/editor, photo resizing
+js/workouts.js          Workout logic: units, time parsing, summaries, records, charts, habit link
+js/workoutForm.js       Workout log form
 js/reminders.js         Reminder permission checks and help text
-js/views/*.js           Today, Habits, Habit detail, Calendar, Stats, Settings
+js/views/*.js           Today, Habits, Habit detail, Workouts + exercise detail, Calendar, Stats, Settings
 icons/                  SVG + PNG icons (192, 512, maskable 512, apple-touch 180)
 ```
 
@@ -104,4 +123,4 @@ There is no push server, so reminders are scheduled **while the app is open or w
 
 ## Your data
 
-Everything lives in `localStorage` on this device under the key `dailyTracker:data` (tasks, habits, categories, journal and settings). The schema is versioned (currently v3) and older data, including backups from earlier versions, is migrated automatically. Use **Settings → Export JSON** for backups, or to move your data to another device with **Import JSON**.
+Everything lives in `localStorage` on this device: `dailyTracker:profiles` holds the profile list (names, avatars, which one is active) and each profile's data is stored under `dailyTracker:data:<profileId>` (tasks, habits, categories, journal, workouts, exercises and settings). Data from before 1.3 is moved into the first profile automatically; the schema is versioned (currently v4) and older data and backups are migrated. **Export JSON** saves all profiles in one file; importing such a file replaces everything (after confirmation), while an older single-profile backup can either replace the current profile or be added as a new one. If saving fails because storage is full (e.g. many photos), the app tells you.

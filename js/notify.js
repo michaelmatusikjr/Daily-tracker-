@@ -1,7 +1,7 @@
 // In-app reminders. Browsers can't reliably wake a closed web app on a timer
 // without a push server, so reminders are scheduled with setTimeout while the
 // app is open (or recently backgrounded) and shown via the service worker.
-import { getState } from './store.js';
+import { getProfiles, readProfileState } from './store.js';
 import { todayKey, addDays, dateAt, fmtTime } from './dates.js';
 import { tasksOn, isTaskDone, activeHabits, isDueOn, habitDone } from './logic.js';
 
@@ -36,35 +36,46 @@ export async function showNotification(title, body, tag) {
   try { new Notification(title, opts); return true; } catch { return false; }
 }
 
+/** Schedule reminders for EVERY profile (each with its own notifications setting). */
 export function reschedule() {
   timers.forEach(clearTimeout);
   timers = [];
-  const st = getState();
-  if (!st.settings.notifications || permission() !== 'granted') return;
+  if (permission() !== 'granted') return;
+  const profiles = getProfiles();
+  const multi = profiles.length > 1;
   const now = Date.now();
   const horizon = now + 36 * 3600000;
   const fired = loadFired();
-  const fmt = st.settings.timeFormat;
-  const plan = (key, at, title, body, stillDue) => {
-    if (fired[key] || at < now - 60000 || at > horizon) return;
-    timers.push(setTimeout(() => {
-      if (!stillDue() || loadFired()[key]) return;
-      markFired(key);
-      showNotification(title, body, key);
-    }, Math.max(0, at - now)));
-  };
   const today = todayKey();
-  for (const k of [today, addDays(today, 1)]) {
-    for (const t of tasksOn(st, k)) {
-      if (!t.time || t.reminder === null || isTaskDone(t, k)) continue;
-      const at = dateAt(k, t.time).getTime() - t.reminder * 60000;
-      plan(`t:${t.id}:${k}`, at, t.title, t.reminder ? `Starts at ${fmtTime(t.time, fmt)}` : 'Starting now',
-        () => { const x = getState().tasks.find((y) => y.id === t.id); return x && !isTaskDone(x, k); });
-    }
-    for (const hb of activeHabits(st)) {
-      if (!hb.reminder || !isDueOn(st, hb, k) || habitDone(st, hb, k)) continue;
-      plan(`h:${hb.id}:${k}`, dateAt(k, hb.reminder).getTime(), `${hb.emoji} ${hb.name}`, 'Time for your habit',
-        () => { const s2 = getState(); const x = s2.habits.find((y) => y.id === hb.id); return x && !x.archived && !habitDone(s2, x, k); });
+  for (const profile of profiles) {
+    const st = readProfileState(profile.id);
+    if (!st || !st.settings.notifications) continue;
+    const fmt = st.settings.timeFormat;
+    const prefix = multi ? `${profile.name}: ` : '';
+    // Re-read the profile's data when the timer fires, so completed items don't notify.
+    const fresh = () => readProfileState(profile.id);
+    const plan = (key, at, title, body, stillDue) => {
+      key = `${profile.id}:${key}`;
+      if (fired[key] || at < now - 60000 || at > horizon) return;
+      timers.push(setTimeout(() => {
+        const s2 = fresh();
+        if (!s2 || !s2.settings.notifications || !stillDue(s2) || loadFired()[key]) return;
+        markFired(key);
+        showNotification(prefix + title, body, key);
+      }, Math.max(0, at - now)));
+    };
+    for (const k of [today, addDays(today, 1)]) {
+      for (const t of tasksOn(st, k)) {
+        if (!t.time || t.reminder === null || isTaskDone(t, k)) continue;
+        const at = dateAt(k, t.time).getTime() - t.reminder * 60000;
+        plan(`t:${t.id}:${k}`, at, t.title, t.reminder ? `Starts at ${fmtTime(t.time, fmt)}` : 'Starting now',
+          (s2) => { const x = s2.tasks.find((y) => y.id === t.id); return x && !isTaskDone(x, k); });
+      }
+      for (const hb of activeHabits(st)) {
+        if (!hb.reminder || !isDueOn(st, hb, k) || habitDone(st, hb, k)) continue;
+        plan(`h:${hb.id}:${k}`, dateAt(k, hb.reminder).getTime(), `${hb.emoji} ${hb.name}`, 'Time for your habit',
+          (s2) => { const x = s2.habits.find((y) => y.id === hb.id); return x && !x.archived && !habitDone(s2, x, k); });
+      }
     }
   }
 }

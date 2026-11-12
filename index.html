@@ -22,7 +22,9 @@
     // important notices (e.g. unreadable data) are never restored out of view.
     try { history.scrollRestoration = 'manual'; } catch (e) {}
     try {
-      var s = JSON.parse(localStorage.getItem('dailyTracker:data') || '{}').settings || {};
+      var idx = JSON.parse(localStorage.getItem('dailyTracker:profiles') || 'null');
+      var key = idx && idx.activeId ? 'dailyTracker:data:' + idx.activeId : 'dailyTracker:data';
+      var s = JSON.parse(localStorage.getItem(key) || '{}').settings || {};
       if (s.theme === 'light' || s.theme === 'dark') document.documentElement.dataset.theme = s.theme;
       if (s.accent) document.documentElement.dataset.accent = s.accent;
     } catch (e) {}
