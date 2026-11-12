@@ -10,7 +10,7 @@ import {
   fmtClock, fmtLong, trimNum, fromKg, fromKm, weightLabel, distLabel, paceText,
 } from '../workouts.js';
 import { openWorkoutForm } from '../workoutForm.js';
-import { deleteWorkout, deleteExercise } from '../actions.js';
+import { deleteWorkout, deleteExercise, resyncExerciseDates } from '../actions.js';
 
 const typeIcon = (ex) => icon(ex?.type === 'cardio' ? 'run' : 'dumbbell', { size: 18 });
 const dayLabel = (k) => fmt(k, { weekday: 'short', month: 'short', day: 'numeric' });
@@ -248,7 +248,11 @@ export function openExerciseEditor(ex) {
     if (getState().exercises.some((e) => e.id !== ex?.id && e.name.toLowerCase() === n.toLowerCase())) { err.textContent = `You already have “${n}”.`; name.focus(); return; }
     update((s2) => {
       if (isNew) s2.exercises.push({ id: 'e' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: n, type, archived: false, createdAt: Date.now() });
-      else Object.assign(s2.exercises.find((e) => e.id === ex.id), { name: n, type, archived });
+      else {
+        const typeChanged = ex.type !== type;
+        Object.assign(s2.exercises.find((e) => e.id === ex.id), { name: n, type, archived });
+        if (typeChanged) resyncExerciseDates(s2, ex.id); // a Strength/Cardio-only habit link may change
+      }
     });
     sheet.close();
     toast(isNew ? `Added ${n}` : `Saved ${n}`);

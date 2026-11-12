@@ -28,6 +28,7 @@ export function setTaskDone(id, k, value) {
     } else {
       x.done = !!value;
     }
+    x.updatedAt = Date.now();
   });
 }
 
@@ -52,7 +53,7 @@ export function moveToToday(ids) {
   const today = todayKey();
   const prev = new Map();
   update((s) => {
-    for (const t of s.tasks) if (ids.includes(t.id)) { prev.set(t.id, t.date); t.date = today; }
+    for (const t of s.tasks) if (ids.includes(t.id)) { prev.set(t.id, t.date); t.date = today; t.updatedAt = Date.now(); }
   });
   toast(ids.length === 1 ? 'Moved to today' : `Moved ${ids.length} tasks to today`, {
     action: 'Undo',
@@ -64,7 +65,7 @@ export function saveTask(data) {
   update((s) => {
     const existing = data.id && s.tasks.find((t) => t.id === data.id);
     if (existing) {
-      Object.assign(existing, data);
+      Object.assign(existing, data, { updatedAt: Date.now() });
     } else {
       const maxOrder = s.tasks.reduce((m, t) => Math.max(m, t.order || 0), 0);
       s.tasks.push({
@@ -93,6 +94,7 @@ export async function deleteTask(id, k) {
       update((s) => {
         const x = s.tasks.find((y) => y.id === id);
         if (!x.exceptions.includes(k)) x.exceptions.push(k);
+        x.updatedAt = Date.now();
         delete x.doneDates[k];
       });
       toast('Removed from this day', {
@@ -172,14 +174,44 @@ export function saveHabit(data) {
   let id = data.id;
   update((s) => {
     const existing = id && s.habits.find((x) => x.id === id);
-    if (existing) Object.assign(existing, data);
+    if (existing) Object.assign(existing, data, { updatedAt: Date.now() });
     else {
       id = uid();
       const maxOrder = s.habits.reduce((m, x) => Math.max(m, x.order || 0), 0);
       s.habits.push({ archived: false, createdAt: todayKey(), ...data, id, order: maxOrder + 1 });
     }
   });
+  // The workout link only works with check-off habits.
+  const st = getState();
+  const hb = st.habits.find((x) => x.id === id);
+  if (st.settings.workoutHabit?.habitId === id && hb?.goal.type !== 'check') {
+    update((s) => { clearAutoChecks(s, id); s.settings.workoutHabit = { habitId: null, filter: 'any' }; });
+    setTimeout(() => toast(`Workout link removed: “${hb.name}” is now a count habit`, { duration: 6000 }), 60);
+  }
   return id;
+}
+
+/** Remove the checks the workout link made for a habit (manual checks stay). */
+function clearAutoChecks(s, hid) {
+  const auto = s.autoHabit[hid];
+  if (!auto) return;
+  for (const d of Object.keys(auto)) if (s.logs[hid]) delete s.logs[hid][d];
+  delete s.autoHabit[hid];
+}
+
+/** Change the workout → habit link. Switching to another habit removes the old one's auto-only checks. */
+export function setWorkoutHabit(habitId, filter) {
+  update((s) => {
+    const old = s.settings.workoutHabit?.habitId || null;
+    if (old && old !== habitId) clearAutoChecks(s, old);
+    s.settings.workoutHabit = { habitId: habitId || null, filter: filter || s.settings.workoutHabit?.filter || 'any' };
+  });
+}
+
+/** After an exercise's type changes, a type-filtered habit link may need re-checking on its dates. */
+export function resyncExerciseDates(s, exerciseId) {
+  const dates = [...new Set(s.workouts.filter((w) => w.exerciseId === exerciseId).map((w) => w.date))];
+  dates.forEach((d) => syncHabitLink(s, d));
 }
 
 function unlinkWorkoutHabit(s, id) {
@@ -187,7 +219,7 @@ function unlinkWorkoutHabit(s, id) {
 }
 
 export function setArchived(id, archived) {
-  update((s) => { const x = s.habits.find((y) => y.id === id); if (x) x.archived = archived; if (archived) unlinkWorkoutHabit(s, id); });
+  update((s) => { const x = s.habits.find((y) => y.id === id); if (x) { x.archived = archived; x.updatedAt = Date.now(); } if (archived) unlinkWorkoutHabit(s, id); });
   toast(archived ? 'Habit archived' : 'Habit restored', {
     action: 'Undo',
     onAction: () => update((s) => { const x = s.habits.find((y) => y.id === id); if (x) x.archived = !archived; }),
@@ -216,6 +248,7 @@ export function setMood(k, mood) {
   update((s) => {
     const j = s.journal[k] || { mood: null, note: '' };
     j.mood = j.mood === mood ? null : mood;
+    j.updatedAt = Date.now();
     if (!j.mood && !j.note) delete s.journal[k]; else s.journal[k] = j;
   });
   haptic(8);
@@ -225,6 +258,7 @@ export function setNote(k, note) {
   update((s) => {
     const j = s.journal[k] || { mood: null, note: '' };
     j.note = note.slice(0, 1000);
+    j.updatedAt = Date.now();
     if (!j.mood && !j.note) delete s.journal[k]; else s.journal[k] = j;
   }, { silent: true });
 }

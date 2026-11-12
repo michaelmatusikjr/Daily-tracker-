@@ -10,6 +10,7 @@ import { canInstall, promptInstall, isIOS, isStandalone } from '../pwa.js';
 import { showOnboarding } from '../onboarding.js';
 import { ensureCategory } from '../forms.js';
 import { reminderStatus, reminderProblem, activeReminders, blockedHelp } from '../reminders.js';
+import { setWorkoutHabit } from '../actions.js';
 
 const setSetting = (key, value, silent = false) => update((s) => { s.settings[key] = value; }, { silent });
 
@@ -65,7 +66,7 @@ export function renderSettings() {
   const linkedOk = checkHabits.some((x) => x.id === wh.habitId);
   const habitSel = h('select.input', {
     'aria-label': 'Habit to check off when you log a workout',
-    onchange: (e) => update((s) => { s.settings.workoutHabit = { habitId: e.target.value || null, filter: s.settings.workoutHabit?.filter || 'any' }; }),
+    onchange: (e) => setWorkoutHabit(e.target.value || null),
   }, h('option', { value: '', selected: !linkedOk }, 'None'), checkHabits.map((x) => h('option', { value: x.id, selected: x.id === wh.habitId }, `${x.emoji} ${x.name}`)));
   root.append(group('Workouts',
     row('Weight', null, segmented([{ value: 'lb', label: 'lbs' }, { value: 'kg', label: 'kg' }], set.weightUnit, (v) => setSetting('weightUnit', v), { label: 'Weight unit', small: true })),
@@ -76,7 +77,8 @@ export function renderSettings() {
         h('span.set-desc', checkHabits.length ? 'Optional. Logging a matching workout checks the habit for that day; removing the workout un-checks it unless you checked it yourself.' : 'Optional. Create a check-off habit (e.g. “Exercise”) to use this.')),
       habitSel,
       linkedOk ? segmented([{ value: 'any', label: 'Any workout' }, { value: 'strength', label: 'Strength' }, { value: 'cardio', label: 'Cardio' }], wh.filter,
-        (v) => update((s) => { s.settings.workoutHabit = { ...s.settings.workoutHabit, filter: v }; }), { label: 'Which workouts count', small: true }) : null)));
+        (val) => setWorkoutHabit(wh.habitId, val), { label: 'Which workouts count', small: true }) : null,
+      h('p.field-hint', 'Only check-off habits can be linked. Changing the habit removes the old habit’s automatic checks; your own checks stay.'))));
 
   // Categories
   const catInput = h('input.input', { type: 'text', placeholder: 'New category', maxlength: 40, 'aria-label': 'New category name' });

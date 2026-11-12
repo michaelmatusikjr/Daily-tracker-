@@ -32,25 +32,59 @@ export function convDist(v, fromUnit, toUnit) {
 }
 
 // ---------- Time ----------
+const THOUSANDS = /^\d{1,3}(,\d{3})+$/;
+const MAX_TIME = 24 * 3600;
+
+/** Human text for a duration: "25 min 30 s", "1 h 15 min", "45 s". */
+export function describeTime(sec) {
+  sec = Math.round(sec);
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), x = sec % 60;
+  return [h && `${h} h`, m && `${m} min`, x && `${x} s`].filter(Boolean).join(' ') || '0 s';
+}
+
 /**
- * Parse a time box. Accepts "90s", "45m", "1h", "1h30", and:
- *  - cardio:   plain number = minutes, "h:mm", "h:mm:ss"
- *  - strength: plain number = seconds, "m:ss", "h:mm:ss" (holds like a 1:30 plank)
- * Returns seconds, null for empty, or NaN when it can't be read.
+ * Read a time box. Accepts "90s", "45m", "1h", "1h15m", "25m30s", "1h15", and:
+ *  - a plain number: minutes for cardio, seconds for strength
+ *  - "a:bb": strength = m:ss; cardio = m:ss when a ≥ 6 (e.g. 25:30), h:mm when a ≤ 5 (e.g. 1:15)
+ *  - "a:bb:cc": always h:mm:ss
+ * `flip` swaps the reading of an ambiguous "a:bb". Returns { sec, text, ambiguous, altText } or
+ * { error } (empty input → { sec: null }).
  */
-export function parseTime(input, type = 'cardio') {
-  const s = String(input ?? '').trim().toLowerCase().replace(',', '.');
-  if (!s) return null;
-  let m = s.match(/^(\d+(?:\.\d+)?)\s*(s|sec|secs|m|min|mins|h|hr|hrs)$/);
-  if (m) { const v = parseFloat(m[1]); return Math.round(v * ({ s: 1, sec: 1, secs: 1, m: 60, min: 60, mins: 60 }[m[2]] || 3600)); }
-  m = s.match(/^(\d+)\s*h\s*(\d+)\s*(m|min)?$/);
-  if (m) return Number(m[1]) * 3600 + Number(m[2]) * 60;
-  if (/^\d+(\.\d+)?$/.test(s)) return Math.round(parseFloat(s) * (type === 'cardio' ? 60 : 1));
+export function readTime(input, type = 'cardio', flip = false) {
+  const raw = String(input ?? '').trim().toLowerCase();
+  if (!raw) return { sec: null, text: '' };
+  if (THOUSANDS.test(raw)) return { error: 'Don’t use thousands separators – e.g. 1000, or 2.5 for a decimal.' };
+  const s = raw.replace(',', '.');
+  const ok = (sec, extra = {}) => {
+    if (!Number.isFinite(sec) || sec < 0) return { error: 'That time can’t be read.' };
+    if (sec > MAX_TIME) return { error: 'That’s more than 24 hours.' };
+    return { sec: Math.round(sec), text: describeTime(sec), ambiguous: false, ...extra };
+  };
+  let m = s.match(/^(?:(\d+(?:\.\d+)?)\s*h(?:rs?|ours?)?)?\s*(?:(\d+(?:\.\d+)?)\s*m(?:in|ins|inutes?)?)?\s*(?:(\d+(?:\.\d+)?)\s*s(?:ecs?|econds?)?)?$/);
+  if (m && (m[1] || m[2] || m[3])) return ok((parseFloat(m[1] || 0) * 3600) + (parseFloat(m[2] || 0) * 60) + parseFloat(m[3] || 0));
+  m = s.match(/^(\d+)\s*h\s*(\d+)$/);
+  if (m) return ok(Number(m[1]) * 3600 + Number(m[2]) * 60);
+  if (/^\d*\.?\d+$/.test(s)) return ok(parseFloat(s) * (type === 'cardio' ? 60 : 1));
   m = s.match(/^(\d+):([0-5]\d)$/);
-  if (m) return type === 'cardio' ? Number(m[1]) * 3600 + Number(m[2]) * 60 : Number(m[1]) * 60 + Number(m[2]);
+  if (m) {
+    const a = Number(m[1]), b = Number(m[2]);
+    const asMs = a * 60 + b, asHm = a * 3600 + b * 60;
+    const defaultMs = type !== 'cardio' || a >= 6;
+    const canHm = asHm <= MAX_TIME;
+    const ambiguous = canHm; // both readings are possible
+    const useMs = ambiguous && flip ? !defaultMs : defaultMs || !canHm;
+    const sec = useMs ? asMs : asHm;
+    return ok(sec, { ambiguous, altText: ambiguous ? describeTime(useMs ? asHm : asMs) : '' });
+  }
   m = s.match(/^(\d+):([0-5]\d):([0-5]\d)$/);
-  if (m) return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
-  return NaN;
+  if (m) return ok(Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]));
+  return { error: type === 'cardio' ? 'Time: minutes (30), m:ss (25:30), h:mm (1:15) or 1h15m.' : 'Time: seconds (45), m:ss (1:30) or 1m30s.' };
+}
+
+/** Seconds, null for empty, NaN when unreadable (kept for callers that only need the value). */
+export function parseTime(input, type = 'cardio', flip = false) {
+  const r = readTime(input, type, flip);
+  return r.error ? NaN : r.sec;
 }
 
 const p2 = (n) => String(n).padStart(2, '0');
@@ -72,7 +106,10 @@ export function fmtLong(sec) {
 /** Value for the time input when editing. */
 export function timeInputValue(sec, type) {
   if (sec === null || sec === undefined) return '';
-  if (type === 'cardio') return sec % 60 ? fmtClock(sec) : String(sec / 60);
+  if (type === 'cardio') {
+    if (sec % 60 === 0) return String(sec / 60);
+    return sec < 6 * 60 || sec >= 3600 ? `${Math.floor(sec / 3600)}:${p2(Math.floor((sec % 3600) / 60))}:${p2(sec % 60)}` : fmtClock(sec);
+  }
   return sec < 60 ? String(sec) : fmtClock(sec);
 }
 /** Pace per display unit, e.g. "12:00/mi". */
@@ -83,6 +120,9 @@ export function paceText(w, settings) {
 }
 
 // ---------- Summaries ----------
+/** A line's weight unit: its own (kept when edited in the other unit) or the entry's. */
+export const lineUnit = (l, w) => l.unit || w.weightUnit;
+
 function lineParts(l, wu, settings, compact) {
   const w = l.weight !== null && l.weight > 0 ? trimNum(convWeight(l.weight, wu, settings.weightUnit), 1) : null;
   const sr = l.sets && l.reps ? `${l.sets}${compact ? '×' : ' × '}${l.reps}` : l.reps ? `${l.reps} reps` : l.sets ? `${l.sets} set${l.sets === 1 ? '' : 's'}` : '';
@@ -94,11 +134,11 @@ export function workoutSummary(w, ex, settings) {
   const parts = [];
   if ((ex?.type || 'strength') === 'strength') {
     if (w.lines.length === 1) {
-      const { w: wt, sr } = lineParts(w.lines[0], w.weightUnit, settings, false);
+      const { w: wt, sr } = lineParts(w.lines[0], lineUnit(w.lines[0], w), settings, false);
       if (wt) parts.push(`${wt} ${weightLabel(settings.weightUnit)}`);
       if (sr) parts.push(sr);
     } else if (w.lines.length > 1) {
-      parts.push(w.lines.map((l) => { const { w: wt, sr } = lineParts(l, w.weightUnit, settings, true); return [wt, sr].filter(Boolean).join(' × '); }).join(', '));
+      parts.push(w.lines.map((l) => { const { w: wt, sr } = lineParts(l, lineUnit(l, w), settings, true); return [wt, sr].filter(Boolean).join(' × '); }).join(', '));
     }
     if (w.time > 0) parts.push(fmtClock(w.time));
     if (w.distance > 0) parts.push(`${trimNum(convDist(w.distance, w.distanceUnit, settings.distanceUnit))} ${distLabel(settings.distanceUnit)}`);
@@ -107,7 +147,7 @@ export function workoutSummary(w, ex, settings) {
     if (w.distance > 0) parts.push(`${trimNum(convDist(w.distance, w.distanceUnit, settings.distanceUnit))} ${distLabel(settings.distanceUnit)}`);
     const pace = paceText(w, settings);
     if (pace) parts.push(pace);
-    if (w.lines.length) parts.push(w.lines.map((l) => { const { w: wt, sr } = lineParts(l, w.weightUnit, settings, true); return [wt, sr].filter(Boolean).join(' × '); }).join(', '));
+    if (w.lines.length) parts.push(w.lines.map((l) => { const { w: wt, sr } = lineParts(l, lineUnit(l, w), settings, true); return [wt, sr].filter(Boolean).join(' × '); }).join(', '));
   }
   return parts.join(' · ');
 }
@@ -156,22 +196,27 @@ export function computeRecords(state, exerciseId) {
   const list = state.workouts.filter((w) => w.exerciseId === exerciseId).sort(chrono);
   const records = new Map();
   const best = { weight: null, repsAt: new Map(), bodyReps: null, time: null, dist: null, pace: null };
-  const wtxt = (kg) => `${trimNum(Math.round(fromKg(kg, s.weightUnit) * 2) / 2, 1)} ${weightLabel(s.weightUnit)}`;
+  // Compare in the display unit after the same rounding the UI uses, so converting between
+  // lb and kg can't create a fake record; equal values (ties) are not records.
+  const dispW = (kg) => Math.round(fromKg(kg, s.weightUnit) * 2) / 2;
+  const dispD = (km) => Math.round(fromKm(km, s.distanceUnit) * 100) / 100;
+  const dispPace = (secPerKm) => Math.round(secPerKm * toKm(1, s.distanceUnit)); // seconds per display unit
+  const wtxt = (v) => `${trimNum(v, 1)} ${weightLabel(s.weightUnit)}`;
   list.forEach((w, i) => {
     const labels = [];
     const first = i === 0;
     for (const l of w.lines) {
       if (l.weight > 0) {
-        const kg = toKg(l.weight, w.weightUnit);
-        const key = Math.round(kg * 10);
-        if (best.weight === null || kg > best.weight.v + 1e-9) {
-          if (!first && best.weight !== null) labels.push(`Heaviest: ${wtxt(kg)}`);
-          best.weight = { v: kg, date: w.date, id: w.id };
+        const kg = toKg(l.weight, lineUnit(l, w));
+        const dw = dispW(kg);
+        if (best.weight === null || dw > best.weight.d) {
+          if (!first && best.weight !== null) labels.push(`Heaviest: ${wtxt(dw)}`);
+          best.weight = { v: kg, d: dw, date: w.date, id: w.id };
         }
         if (l.reps > 0) {
-          const prev = best.repsAt.get(key);
-          if (prev !== undefined && l.reps > prev.v && !first) labels.push(`Most reps at ${wtxt(kg)}: ${l.reps}`);
-          if (prev === undefined || l.reps > prev.v) best.repsAt.set(key, { v: l.reps, kg, date: w.date });
+          const prev = best.repsAt.get(dw);
+          if (prev !== undefined && l.reps > prev.v && !first) labels.push(`Most reps at ${wtxt(dw)}: ${l.reps}`);
+          if (prev === undefined || l.reps > prev.v) best.repsAt.set(dw, { v: l.reps, kg, date: w.date });
         }
       } else if (l.reps > 0) {
         if (best.bodyReps !== null && l.reps > best.bodyReps.v && !first) labels.push(`Most reps: ${l.reps}`);
@@ -184,12 +229,13 @@ export function computeRecords(state, exerciseId) {
     }
     if (w.distance > 0) {
       const km = toKm(w.distance, w.distanceUnit);
-      if (best.dist !== null && km > best.dist.v + 1e-9 && !first) labels.push(`Longest distance: ${trimNum(fromKm(km, s.distanceUnit))} ${distLabel(s.distanceUnit)}`);
-      if (best.dist === null || km > best.dist.v) best.dist = { v: km, date: w.date };
+      const dd = dispD(km);
+      if (best.dist !== null && dd > best.dist.d && !first) labels.push(`Longest distance: ${trimNum(dd)} ${distLabel(s.distanceUnit)}`);
+      if (best.dist === null || dd > best.dist.d) best.dist = { v: km, d: dd, date: w.date };
       if (w.time > 0) {
-        const pace = w.time / km; // seconds per km (lower is faster)
-        if (best.pace !== null && pace < best.pace.v - 1e-9 && !first) labels.push(`Fastest pace: ${paceText(w, s)}`);
-        if (best.pace === null || pace < best.pace.v) best.pace = { v: pace, date: w.date, w };
+        const pace = dispPace(w.time / km); // whole seconds per display unit (lower is faster)
+        if (best.pace !== null && pace < best.pace.d && !first) labels.push(`Fastest pace: ${paceText(w, s)}`);
+        if (best.pace === null || pace < best.pace.d) best.pace = { v: w.time / km, d: pace, date: w.date, w };
       }
     }
     if (labels.length) records.set(w.id, [...new Set(labels)]);
@@ -217,7 +263,7 @@ export function chartSeries(state, exerciseId) {
     if (w.exerciseId !== exerciseId) continue;
     const d = byDay.get(w.date) || { weight: null, reps: null, time: 0, dist: 0, paceTime: 0, paceDist: 0 };
     for (const l of w.lines) {
-      if (l.weight > 0) d.weight = Math.max(d.weight ?? 0, fromKg(toKg(l.weight, w.weightUnit), s.weightUnit));
+      if (l.weight > 0) d.weight = Math.max(d.weight ?? 0, fromKg(toKg(l.weight, lineUnit(l, w)), s.weightUnit));
       if (l.reps > 0) d.reps = Math.max(d.reps ?? 0, l.reps);
     }
     if (w.time > 0) d.time += w.time;

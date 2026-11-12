@@ -2,7 +2,7 @@
 // Several profiles: an index key plus one data key per profile.
 import { todayKey, isValidKey } from './dates.js';
 
-export const APP_VERSION = '1.3.0';
+export const APP_VERSION = '1.3.1';
 export const SCHEMA_VERSION = 4;
 const LEGACY_KEY = 'dailyTracker:data'; // single-profile data before 1.3.0
 const PROFILES_KEY = 'dailyTracker:profiles';
@@ -93,6 +93,7 @@ function normTask(t, i) {
     exceptions: Array.isArray(t.exceptions) ? t.exceptions.filter(isValidKey) : [],
     order: Number.isFinite(t.order) ? t.order : i,
     createdAt: Number.isFinite(t.createdAt) ? t.createdAt : Date.now(),
+    ...(Number.isFinite(t.updatedAt) ? { updatedAt: t.updatedAt } : {}),
   };
 }
 
@@ -123,6 +124,7 @@ function normHabit(hb, i) {
     archived: !!hb.archived,
     order: Number.isFinite(hb.order) ? hb.order : i,
     createdAt: isValidKey(hb.createdAt) ? hb.createdAt : todayKey(),
+    ...(Number.isFinite(hb.updatedAt) ? { updatedAt: hb.updatedAt } : {}),
   };
 }
 
@@ -139,22 +141,28 @@ function normExercise(e) {
   };
 }
 
-function normLine(l) {
+// Sanity caps (form input is validated against the same limits).
+export const CAPS = { reps: 1000, sets: 100, weight: { lb: 2000, kg: 1000 }, time: 24 * 3600, distance: 1000 };
+
+function normLine(l, wu) {
   if (!isObj(l)) return null;
-  const line = { weight: num(l.weight, 5000), sets: int(l.sets, 1000), reps: int(l.reps, 100000) };
-  return Object.values(line).some((v) => v !== null && v > 0) ? line : null;
+  // A line may keep its own unit when it was left unchanged while editing in the other unit.
+  const unit = l.unit === 'kg' || l.unit === 'lb' ? l.unit : null;
+  const line = { weight: num(l.weight, CAPS.weight[unit || wu]), sets: int(l.sets, CAPS.sets), reps: int(l.reps, CAPS.reps) };
+  if (unit && unit !== wu) line.unit = unit;
+  return [line.weight, line.sets, line.reps].some((v) => v !== null && v > 0) ? line : null;
 }
 
 function normWorkout(w) {
   if (!isObj(w) || !isValidKey(w.date) || typeof w.exerciseId !== 'string' || !w.exerciseId) return null;
   const out = {
     id: str(w.id, 40) || uid(), date: w.date, exerciseId: w.exerciseId.slice(0, 40),
-    lines: (Array.isArray(w.lines) ? w.lines : []).map(normLine).filter(Boolean).slice(0, 30),
     weightUnit: w.weightUnit === 'kg' ? 'kg' : 'lb',
-    time: num(w.time, 1e6), // seconds
-    distance: num(w.distance, 1e5), distanceUnit: w.distanceUnit === 'km' ? 'km' : 'mi',
+    time: num(w.time, CAPS.time), // seconds
+    distance: num(w.distance, CAPS.distance), distanceUnit: w.distanceUnit === 'km' ? 'km' : 'mi',
     note: str(w.note, 300), createdAt: Number.isFinite(w.createdAt) ? w.createdAt : Date.now(),
   };
+  out.lines = (Array.isArray(w.lines) ? w.lines : []).map((l) => normLine(l, out.weightUnit)).filter(Boolean).slice(0, 30);
   if (!out.lines.length && !(out.time > 0) && !(out.distance > 0)) return null; // nothing logged
   return out;
 }
@@ -205,6 +213,7 @@ function normProfileMeta(p, i) {
     id: /^[A-Za-z0-9_-]{1,40}$/.test(p.id) ? p.id : uid(),
     name: str(p.name, 40).trim() || 'Me',
     avatar: normAvatar(p.avatar, PROFILE_COLORS[i % PROFILE_COLORS.length]),
+    updatedAt: Number.isFinite(p.updatedAt) ? p.updatedAt : 0,
     ...(p.introPending ? { introPending: true } : {}),
   };
 }
@@ -254,7 +263,7 @@ export function normalize(data) {
       if (!isValidKey(k) || !isObj(v)) continue;
       const mood = [1, 2, 3, 4, 5].includes(v.mood) ? v.mood : null;
       const note = str(v.note, 1000);
-      if (mood || note) out.journal[k] = { mood, note };
+      if (mood || note) out.journal[k] = { mood, note, ...(Number.isFinite(v.updatedAt) ? { updatedAt: v.updatedAt } : {}) };
     }
   }
   return out;
@@ -285,11 +294,14 @@ export function validateImport(obj) {
     const seen = new Set();
     obj.profiles.slice(0, 20).forEach((p, i) => {
       const meta = normProfileMeta(p, i);
-      if (!meta || !isObj(p.data)) return;
+      if (!meta) return;
+      const unreadable = p.unreadable === true && typeof p.raw === 'string' && p.raw.length <= 5e6;
+      if (!unreadable && !isObj(p.data)) return;
       while (seen.has(meta.id)) meta.id = uid();
       seen.add(meta.id);
       delete meta.introPending;
-      profiles.push({ ...meta, data: migrate(p.data) });
+      // Data this app couldn't read is carried as raw text, so restoring keeps its safety guard.
+      profiles.push(unreadable ? { ...meta, raw: p.raw, unreadable: true } : { ...meta, data: migrate(p.data) });
     });
     if (!profiles.length) throw new Error('The backup contains no profiles.');
     const activeId = profiles.some((p) => p.id === obj.activeId) ? obj.activeId : profiles[0].id;
@@ -308,40 +320,84 @@ let storageOk = true;
 // If saved data can't be read we keep a backup and block saving until the user decides,
 // so a bug or corrupted value never silently overwrites their data.
 let loadFailure = null; // { raw, backupKey, error }
-let index = { activeId: null, profiles: [] }; // profile index
+// Profile index: { activeId, profiles, deleted: [ids], migratedLegacy: { profileId, hash, length, at } }
+let index = { activeId: null, profiles: [], deleted: [], migratedLegacy: null };
 const listeners = new Set();
 const saveErrorListeners = new Set();
+const saveOkListeners = new Set();
 
 function lsGet(k) { return localStorage.getItem(k); }
 function lsSet(k, v) {
-  try { localStorage.setItem(k, v); return true; } catch (e) {
+  try {
+    localStorage.setItem(k, v);
+    if (!storageOk) { storageOk = true; saveOkListeners.forEach((l) => l()); }
+    return true;
+  } catch (e) {
     storageOk = false;
     saveErrorListeners.forEach((l) => l(e));
     return false;
   }
 }
 
+/** Small, stable string hash (FNV-1a) to recognise legacy data we've already moved. */
+export function hashStr(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(36) + ':' + str.length;
+}
+
+function readStoredIndex() {
+  let parsed = null;
+  try { parsed = JSON.parse(lsGet(PROFILES_KEY) || 'null'); } catch { parsed = null; }
+  if (!isObj(parsed) || !Array.isArray(parsed.profiles)) return null;
+  const seen = new Set();
+  return {
+    activeId: parsed.activeId,
+    profiles: parsed.profiles.map(normProfileMeta).filter((p) => p && !seen.has(p.id) && seen.add(p.id)),
+    deleted: Array.isArray(parsed.deleted) ? parsed.deleted.filter((x) => typeof x === 'string').slice(-200) : [],
+    migratedLegacy: isObj(parsed.migratedLegacy) ? parsed.migratedLegacy : null,
+  };
+}
+
+/**
+ * Combine this tab's index with what's stored (another tab may have changed it): union by id,
+ * newer profile edits win, deletions are remembered as tombstones so they stick.
+ */
+function mergeIndex(mine, stored) {
+  if (!stored) return mine;
+  const deleted = new Set([...(mine.deleted || []), ...(stored.deleted || [])]);
+  const byId = new Map(stored.profiles.map((p) => [p.id, p]));
+  const order = [...mine.profiles.map((p) => p.id), ...stored.profiles.map((p) => p.id)];
+  for (const p of mine.profiles) {
+    const o = byId.get(p.id);
+    if (!o || (p.updatedAt || 0) >= (o.updatedAt || 0)) byId.set(p.id, p);
+  }
+  const profiles = [...new Set(order)].filter((id) => !deleted.has(id)).map((id) => byId.get(id));
+  return { activeId: mine.activeId, profiles, deleted: [...deleted].slice(-200), migratedLegacy: mine.migratedLegacy || stored.migratedLegacy || null };
+}
+
 function saveIndex() {
-  return lsSet(PROFILES_KEY, JSON.stringify({ version: 1, activeId: index.activeId, profiles: index.profiles }));
+  index = mergeIndex(index, readStoredIndex());
+  if (!index.profiles.some((p) => p.id === index.activeId)) index.activeId = index.profiles[0]?.id || null;
+  return lsSet(PROFILES_KEY, JSON.stringify({ version: 1, ...index }));
 }
 
 /** Read (or create) the profile index, moving pre-1.3 single-profile data into the first profile. */
 function loadIndex() {
-  let parsed = null;
-  try { parsed = JSON.parse(lsGet(PROFILES_KEY) || 'null'); } catch { parsed = null; }
-  if (isObj(parsed) && Array.isArray(parsed.profiles)) {
-    const seen = new Set();
-    const profiles = parsed.profiles.map(normProfileMeta).filter((p) => p && !seen.has(p.id) && seen.add(p.id));
-    if (profiles.length) {
-      index = { activeId: profiles.some((p) => p.id === parsed.activeId) ? parsed.activeId : profiles[0].id, profiles };
-      return;
-    }
+  const stored = readStoredIndex();
+  if (stored && stored.profiles.length) {
+    index = { ...stored, activeId: stored.profiles.some((p) => p.id === stored.activeId) ? stored.activeId : stored.profiles[0].id };
+    return;
   }
   // First run of 1.3+: the old data (if any) becomes the first profile. The raw text is moved
   // as-is, so even unreadable data keeps its load-failure/backup protection.
   const legacy = lsGet(LEGACY_KEY);
   const id = 'p' + uid();
-  index = { activeId: id, profiles: [{ id, name: 'Me', avatar: { type: 'emoji', emoji: '', color: PROFILE_COLORS[0] }, ...(legacy ? { introPending: true } : {}) }] };
+  index = {
+    activeId: id, deleted: [],
+    profiles: [{ id, name: 'Me', avatar: { type: 'emoji', emoji: '', color: PROFILE_COLORS[0] }, updatedAt: 0, ...(legacy ? { introPending: true } : {}) }],
+    migratedLegacy: legacy !== null ? { profileId: id, hash: hashStr(legacy), length: legacy.length, at: Date.now() } : null,
+  };
   if (legacy !== null) {
     if (!lsSet(dataKey(id), legacy)) return; // keep the legacy key if the copy failed
   }
@@ -409,22 +465,22 @@ export function resolveLoadFailure() {
 
 export function save() {
   if (loadFailure || !index.activeId) return false;
-  const ok = lsSet(dataKey(index.activeId), JSON.stringify(state));
-  if (ok) storageOk = true;
-  return ok;
+  return lsSet(dataKey(index.activeId), JSON.stringify(state));
 }
 
 export const isStorageOk = () => storageOk;
 export const getState = () => state;
 export const onSaveError = (fn) => saveErrorListeners.add(fn);
+export const onSaveOk = (fn) => saveOkListeners.add(fn);
 
 function emit(info = {}) { listeners.forEach((l) => l(state, info)); }
 
-/** Mutate state via fn(state), persist, and notify listeners (unless silent). */
+/** Mutate state via fn(state), persist, and notify listeners (unless silent). Returns whether it saved. */
 export function update(fn, { silent = false } = {}) {
   fn(state);
-  save();
+  const ok = save();
   if (!silent) emit();
+  return ok;
 }
 
 export function replaceState(next) {
@@ -442,6 +498,7 @@ export function subscribe(fn) {
 // ---------- Profile API ----------
 export const getProfiles = () => index.profiles;
 export const getActiveProfile = () => index.profiles.find((p) => p.id === index.activeId) || index.profiles[0];
+export const getIndexInfo = () => ({ migratedLegacy: index.migratedLegacy });
 
 export function switchProfile(id) {
   if (id === index.activeId || !index.profiles.some((p) => p.id === id)) return false;
@@ -454,14 +511,14 @@ export function switchProfile(id) {
 }
 
 /** Create a profile (optionally with existing data) and switch to it. */
-export function addProfile({ name, avatar, data = null }) {
+export function addProfile({ name, avatar, data = null, raw = null }) {
   const id = 'p' + uid();
-  const meta = normProfileMeta({ id, name, avatar }, index.profiles.length);
+  const meta = { ...normProfileMeta({ id, name, avatar }, index.profiles.length), updatedAt: Date.now() };
   const fresh = data || defaultState();
-  if (!data) fresh.settings.onboarded = true;
-  if (!lsSet(dataKey(id), JSON.stringify(fresh))) return null;
+  if (!data && raw === null) fresh.settings.onboarded = true;
+  if (!lsSet(dataKey(id), raw !== null ? raw : JSON.stringify(fresh))) return null;
   index.profiles.push(meta);
-  if (!saveIndex()) { index.profiles.pop(); try { localStorage.removeItem(dataKey(id)); } catch { /* ignore */ } return null; }
+  if (!saveIndex()) { index.profiles = index.profiles.filter((p) => p.id !== id); try { localStorage.removeItem(dataKey(id)); } catch { /* ignore */ } return null; }
   switchProfile(id);
   return id;
 }
@@ -472,9 +529,9 @@ export function updateProfile(id, patch) {
   const prev = { ...p };
   const next = normProfileMeta({ ...p, ...patch, id }, index.profiles.indexOf(p));
   delete next.introPending;
-  Object.assign(p, next);
+  Object.assign(p, next, { updatedAt: Date.now() });
   if (!patch.introPending) delete p.introPending;
-  if (!saveIndex()) { Object.assign(p, prev); return false; }
+  if (!saveIndex()) { Object.keys(p).forEach((k) => delete p[k]); Object.assign(p, prev); return false; }
   emit({ profileChanged: true });
   return true;
 }
@@ -483,6 +540,7 @@ export function deleteProfile(id) {
   if (index.profiles.length <= 1) return false;
   const wasActive = id === index.activeId;
   index.profiles = index.profiles.filter((p) => p.id !== id);
+  index.deleted = [...(index.deleted || []), id];
   if (wasActive) index.activeId = index.profiles[0].id;
   saveIndex();
   try { localStorage.removeItem(dataKey(id)); } catch { /* ignore */ }
@@ -493,32 +551,173 @@ export function deleteProfile(id) {
 
 /** Read-only state of any profile (the active one from memory). Unreadable data → null. */
 export function readProfileState(id) {
-  if (id === index.activeId) return state;
+  if (id === index.activeId) return loadFailure ? null : state;
   try {
     const raw = lsGet(dataKey(id));
     return raw ? migrate(JSON.parse(raw)) : defaultState();
   } catch { return null; }
 }
 
+function isReadable(id) {
+  if (id === index.activeId) return !loadFailure;
+  return readProfileState(id) !== null;
+}
+
+/** Profiles on this device whose data can't be read (they're never deleted without asking). */
+export function unreadableProfiles(excludeIds = []) {
+  return index.profiles.filter((p) => !excludeIds.includes(p.id) && !isReadable(p.id));
+}
+
 export function exportPayload() {
   return {
     app: 'daily-tracker', appVersion: APP_VERSION, format: 'profiles', exportedAt: new Date().toISOString(),
     activeId: index.activeId,
-    profiles: index.profiles.map((p) => ({ id: p.id, name: p.name, avatar: p.avatar, data: readProfileState(p.id) })).filter((p) => p.data),
+    profiles: index.profiles.map((p) => {
+      const meta = { id: p.id, name: p.name, avatar: p.avatar };
+      if (p.id === index.activeId && loadFailure) return { ...meta, unreadable: true, raw: loadFailure.raw ?? '' };
+      const data = readProfileState(p.id);
+      if (data) return { ...meta, data };
+      let raw = '';
+      try { raw = lsGet(dataKey(p.id)) ?? ''; } catch { /* ignore */ }
+      return { ...meta, unreadable: true, raw };
+    }),
   };
 }
 
-/** Replace every profile with an imported multi-profile backup. */
-export function replaceAllProfiles({ activeId, profiles }) {
-  const old = index.profiles.map((p) => p.id);
-  for (const p of profiles) if (!lsSet(dataKey(p.id), JSON.stringify(p.data))) return false;
-  old.filter((id) => !profiles.some((p) => p.id === id)).forEach((id) => {
-    try { localStorage.removeItem(dataKey(id)); } catch { /* ignore */ }
-    pruneBackups(id, 0);
-  });
-  index = { activeId, profiles: profiles.map(({ id, name, avatar }) => ({ id, name, avatar })) };
-  saveIndex();
+/**
+ * Replace every profile with an imported multi-profile backup. Profiles on this device whose
+ * data can't be read are kept (with their backups) unless deleteUnreadable is explicitly true.
+ */
+export function replaceAllProfiles({ activeId, profiles }, { deleteUnreadable = false } = {}) {
+  const keepUnreadable = deleteUnreadable ? [] : unreadableProfiles(profiles.map((p) => p.id));
+  for (const p of profiles) {
+    const ok = lsSet(dataKey(p.id), p.unreadable ? p.raw : JSON.stringify(p.data));
+    if (!ok) return false;
+  }
+  const keepIds = new Set([...profiles.map((p) => p.id), ...keepUnreadable.map((p) => p.id)]);
+  const removed = index.profiles.map((p) => p.id).filter((id) => !keepIds.has(id));
+  removed.forEach((id) => { try { localStorage.removeItem(dataKey(id)); } catch { /* ignore */ } });
+  // Backup keys are left alone here; they only ever hold copies of unreadable data.
+  index = {
+    activeId,
+    profiles: [...profiles.map(({ id, name, avatar }) => ({ id, name, avatar, updatedAt: Date.now() })), ...keepUnreadable],
+    deleted: [...(index.deleted || []), ...removed],
+    migratedLegacy: index.migratedLegacy,
+  };
+  lsSet(PROFILES_KEY, JSON.stringify({ version: 1, ...index })); // a full replace: don't merge the old list back in
   loadProfileData(activeId);
   emit({ profileSwitched: true });
   return true;
+}
+
+// ---------- Changes from other tabs ----------
+/**
+ * Handle a `storage` event (another tab changed localStorage). Returns what happened, or null.
+ * - the profile list changed → refresh it; if our active profile was deleted, switch.
+ * - our active profile's data changed → reload it.
+ * - an older app version wrote the pre-1.3 key → report it (see pendingLegacy).
+ */
+export function handleStorageEvent(e) {
+  if (e.key === null) return null; // storage cleared elsewhere; ignore
+  if (e.key === PROFILES_KEY) {
+    const stored = readStoredIndex();
+    if (!stored) return null;
+    const deleted = new Set(stored.deleted);
+    const mine = { ...index, profiles: index.profiles.filter((p) => !deleted.has(p.id)) };
+    index = mergeIndex(mine, stored);
+    if (!index.profiles.some((p) => p.id === index.activeId)) {
+      const gone = index.activeId;
+      index.activeId = index.profiles[0]?.id || null;
+      if (index.activeId) { loadProfileData(index.activeId); emit({ profileSwitched: true, deletedElsewhere: gone }); }
+      return { deletedElsewhere: gone };
+    }
+    emit({ profileChanged: true });
+    return { profileChanged: true };
+  }
+  if (e.key === dataKey(index.activeId)) {
+    loadProfileData(index.activeId);
+    emit({ external: true });
+    return { external: true };
+  }
+  if (e.key === LEGACY_KEY && e.newValue !== null) {
+    emit({ legacyChanged: true });
+    return { legacyChanged: true };
+  }
+  return null;
+}
+
+// ---------- Data written by an older (pre-1.3) tab after the upgrade ----------
+/** Legacy data that appeared after migration (an old tab kept writing it), or null. */
+export function pendingLegacy() {
+  let raw = null;
+  try { raw = lsGet(LEGACY_KEY); } catch { return null; }
+  if (raw === null) return null;
+  if (index.migratedLegacy && index.migratedLegacy.hash === hashStr(raw)) {
+    try { localStorage.removeItem(LEGACY_KEY); } catch { /* ignore */ } // already moved; leftover copy
+    return null;
+  }
+  return { raw };
+}
+
+function mergeById(cur, leg, since) {
+  const out = [...cur];
+  const pos = new Map(cur.map((x, i) => [x.id, i]));
+  for (const item of leg) {
+    if (!pos.has(item.id)) { out.push(item); continue; }
+    const mine = out[pos.get(item.id)];
+    if (JSON.stringify(mine) === JSON.stringify(item)) continue;
+    // Edited in this version after the upgrade → keep ours; otherwise the older tab's edit is newer.
+    if ((mine.updatedAt || 0) > since) continue;
+    out[pos.get(item.id)] = { ...item, updatedAt: Date.now() };
+  }
+  return out;
+}
+
+/** Merge older-version data into a profile's data: by id, newer wins (tasks, habits, logs, journal). */
+export function mergeLegacyInto(cur, leg, since) {
+  const out = JSON.parse(JSON.stringify(cur));
+  out.tasks = mergeById(out.tasks, leg.tasks, since);
+  out.habits = mergeById(out.habits, leg.habits, since);
+  const catIds = new Set(out.categories.map((c) => c.id));
+  leg.categories.forEach((c) => { if (!catIds.has(c.id)) out.categories.push(c); });
+  for (const [hid, days] of Object.entries(leg.logs)) {
+    out.logs[hid] = out.logs[hid] || {};
+    for (const [d, v] of Object.entries(days)) out.logs[hid][d] = Math.max(out.logs[hid][d] || 0, v);
+  }
+  for (const [d, j] of Object.entries(leg.journal)) {
+    const mine = out.journal[d];
+    if (!mine || ((mine.updatedAt || 0) <= since && JSON.stringify(mine) !== JSON.stringify(j))) out.journal[d] = j;
+  }
+  return normalize(out);
+}
+
+/** action: 'merge' (into targetId), 'add' (new profile) or 'discard'. Returns a short result message. */
+export function resolveLegacy(action, targetId = index.activeId) {
+  const pending = pendingLegacy();
+  if (!pending) return 'Nothing to do';
+  const done = () => {
+    index.migratedLegacy = { ...(index.migratedLegacy || {}), hash: hashStr(pending.raw), length: pending.raw.length, at: Date.now() };
+    saveIndex();
+    try { localStorage.removeItem(LEGACY_KEY); } catch { /* ignore */ }
+  };
+  if (action === 'discard') { done(); return 'Discarded'; }
+  let leg;
+  try { leg = migrate(JSON.parse(pending.raw)); } catch {
+    if (action === 'add') { const id = addProfile({ name: 'Older version', raw: pending.raw }); if (id) done(); return id ? 'Added' : 'Storage full'; }
+    return 'Unreadable';
+  }
+  if (action === 'add') {
+    leg.settings.onboarded = true;
+    const id = addProfile({ name: 'Older version', data: leg });
+    if (id) done();
+    return id ? 'Added' : 'Storage full';
+  }
+  const since = index.migratedLegacy?.at || 0;
+  const cur = targetId === index.activeId ? (loadFailure ? null : state) : readProfileState(targetId);
+  if (!cur) return 'Unreadable';
+  const merged = mergeLegacyInto(cur, leg, since);
+  if (targetId === index.activeId) { state = merged; if (!save()) return 'Storage full'; emit(); }
+  else if (!lsSet(dataKey(targetId), JSON.stringify(merged))) return 'Storage full';
+  done();
+  return 'Merged';
 }
