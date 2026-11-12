@@ -2,10 +2,14 @@
 // Several profiles: an index key plus one data key per profile.
 import { todayKey, isValidKey } from './dates.js';
 
-export const APP_VERSION = '1.3.1';
+export const APP_VERSION = '1.3.2';
 export const SCHEMA_VERSION = 4;
 const LEGACY_KEY = 'dailyTracker:data'; // single-profile data before 1.3.0
 const PROFILES_KEY = 'dailyTracker:profiles';
+// Copy of the pre-1.3 data as it was when it was moved, so a later merge can tell what an
+// old tab really changed (three-way merge). Removed 14 days after the upgrade.
+const BASELINE_KEY = 'dailyTracker:legacyBaseline';
+const BASELINE_TTL = 14 * 86400000;
 export const dataKey = (id) => `${LEGACY_KEY}:${id}`;
 const ACCENT_IDS = ['indigo', 'teal', 'rose', 'amber', 'green', 'blue'];
 
@@ -400,6 +404,7 @@ function loadIndex() {
   };
   if (legacy !== null) {
     if (!lsSet(dataKey(id), legacy)) return; // keep the legacy key if the copy failed
+    try { localStorage.setItem(BASELINE_KEY, legacy); } catch { /* optional: merge falls back to two-way */ }
   }
   if (saveIndex() && legacy !== null) { try { localStorage.removeItem(LEGACY_KEY); } catch { /* ignore */ } }
 }
@@ -424,6 +429,10 @@ function loadProfileData(id) {
 
 export function load() {
   try { loadIndex(); } catch { storageOk = false; }
+  try {
+    const at = index.migratedLegacy?.at || 0;
+    if (lsGet(BASELINE_KEY) !== null && lsGet(LEGACY_KEY) === null && Date.now() - at > BASELINE_TTL) localStorage.removeItem(BASELINE_KEY);
+  } catch { /* ignore */ }
   if (index.activeId) loadProfileData(index.activeId); else state = defaultState();
   return state;
 }
@@ -639,6 +648,10 @@ export function handleStorageEvent(e) {
     emit({ external: true });
     return { external: true };
   }
+  if (e.key === LEGACY_KEY && e.newValue === null) {
+    emit({ legacyResolved: true }); // another tab handled it
+    return { legacyResolved: true };
+  }
   if (e.key === LEGACY_KEY && e.newValue !== null) {
     emit({ legacyChanged: true });
     return { legacyChanged: true };
@@ -659,35 +672,73 @@ export function pendingLegacy() {
   return { raw };
 }
 
-function mergeById(cur, leg, since) {
-  const out = [...cur];
-  const pos = new Map(cur.map((x, i) => [x.id, i]));
-  for (const item of leg) {
-    if (!pos.has(item.id)) { out.push(item); continue; }
-    const mine = out[pos.get(item.id)];
-    if (JSON.stringify(mine) === JSON.stringify(item)) continue;
-    // Edited in this version after the upgrade → keep ours; otherwise the older tab's edit is newer.
-    if ((mine.updatedAt || 0) > since) continue;
-    out[pos.get(item.id)] = { ...item, updatedAt: Date.now() };
+const strip = (x) => {
+  if (x === undefined || x === null) return x;
+  // Bookkeeping fields aren't user changes (createdAt is filled in when old data lacks it).
+  const { updatedAt, order, createdAt, ...rest } = x; void updatedAt; void order; void createdAt;
+  return JSON.stringify(rest);
+};
+const same = (a, b) => strip(a) === strip(b);
+
+/**
+ * Three-way merge of one value: base = as migrated, leg = old tab now, cur = this version now.
+ * - old tab didn't change it → keep ours (including a local deletion / un-check)
+ * - old tab changed it → take theirs, unless we changed it too after the upgrade (newer wins)
+ * - old tab deleted it → delete, unless we changed it locally
+ * Returns the value to keep, or undefined to drop it.
+ */
+function merge3(base, leg, cur, since) {
+  if (same(leg, base)) return cur;
+  if (leg === undefined) return cur !== undefined && !same(cur, base) ? cur : undefined;
+  if (cur !== undefined && !same(cur, base) && (cur.updatedAt || 0) > since) return cur; // both changed: ours is newer
+  return leg;
+}
+
+function mergeList(baseList, legList, curList, since) {
+  const B = new Map((baseList || []).map((x) => [x.id, x]));
+  const L = new Map(legList.map((x) => [x.id, x]));
+  const C = new Map(curList.map((x) => [x.id, x]));
+  const ids = [...new Set([...curList.map((x) => x.id), ...legList.map((x) => x.id), ...B.keys()])];
+  const out = [];
+  for (const id of ids) {
+    const v = merge3(B.get(id), L.get(id), C.get(id), since);
+    if (v !== undefined) out.push(v === L.get(id) && v !== C.get(id) ? { ...v, ...(C.get(id)?.order !== undefined ? { order: C.get(id).order } : {}), updatedAt: Date.now() } : v);
   }
   return out;
 }
 
-/** Merge older-version data into a profile's data: by id, newer wins (tasks, habits, logs, journal). */
-export function mergeLegacyInto(cur, leg, since) {
+/** Three-way map merge for { key: value } (habit logs per habit, journal per date). */
+function mergeMap(base, leg, cur, since, wrap = (v) => v) {
+  const out = {};
+  for (const k of new Set([...Object.keys(cur), ...Object.keys(leg), ...Object.keys(base)])) {
+    const v = merge3(wrap(base[k]), wrap(leg[k]), wrap(cur[k]), since);
+    if (v !== undefined) out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Merge older-version data into a profile's data. With a baseline (the data as it was moved at
+ * the upgrade) this is a true three-way merge: local deletions and un-checks stay, and deletions
+ * made in the old tab are applied. Without one (upgraded before 1.3.2) nothing in the baseline is
+ * known, so additions and old-tab edits come in and deletions are not applied.
+ */
+export function mergeLegacyInto(cur, leg, since, base = null) {
+  const b = base || { tasks: [], habits: [], categories: [], logs: {}, journal: {} };
   const out = JSON.parse(JSON.stringify(cur));
-  out.tasks = mergeById(out.tasks, leg.tasks, since);
-  out.habits = mergeById(out.habits, leg.habits, since);
-  const catIds = new Set(out.categories.map((c) => c.id));
-  leg.categories.forEach((c) => { if (!catIds.has(c.id)) out.categories.push(c); });
-  for (const [hid, days] of Object.entries(leg.logs)) {
-    out.logs[hid] = out.logs[hid] || {};
-    for (const [d, v] of Object.entries(days)) out.logs[hid][d] = Math.max(out.logs[hid][d] || 0, v);
+  out.tasks = mergeList(b.tasks, leg.tasks, out.tasks, since);
+  out.habits = mergeList(b.habits, leg.habits, out.habits, since);
+  out.categories = mergeList(b.categories, leg.categories, out.categories, since);
+  // Habit logs: per habit, per day, same three-way rule (values wrapped so "absent" is undefined).
+  const box = (v) => (v === undefined ? undefined : { v });
+  const hids = new Set([...Object.keys(out.logs), ...Object.keys(leg.logs), ...Object.keys(b.logs)]);
+  for (const hid of hids) {
+    const m = mergeMap(b.logs[hid] || {}, leg.logs[hid] || {}, out.logs[hid] || {}, since, box);
+    out.logs[hid] = Object.fromEntries(Object.entries(m).map(([d, x]) => [d, x.v]));
+    // A day the old tab changed is no longer an automatic (workout-link) check.
+    if (out.autoHabit?.[hid]) for (const d of Object.keys(out.autoHabit[hid])) if (out.logs[hid][d] !== (cur.logs[hid] || {})[d]) delete out.autoHabit[hid][d];
   }
-  for (const [d, j] of Object.entries(leg.journal)) {
-    const mine = out.journal[d];
-    if (!mine || ((mine.updatedAt || 0) <= since && JSON.stringify(mine) !== JSON.stringify(j))) out.journal[d] = j;
-  }
+  out.journal = mergeMap(b.journal, leg.journal, out.journal, since);
   return normalize(out);
 }
 
@@ -696,8 +747,11 @@ export function resolveLegacy(action, targetId = index.activeId) {
   const pending = pendingLegacy();
   if (!pending) return 'Nothing to do';
   const done = () => {
-    index.migratedLegacy = { ...(index.migratedLegacy || {}), hash: hashStr(pending.raw), length: pending.raw.length, at: Date.now() };
+    // `at` moves forward: later merges treat edits made after this point as "ours, newer".
+    index.migratedLegacy = { ...(index.migratedLegacy || {}), hash: hashStr(pending.raw), length: pending.raw.length, at: Date.now() + 1 };
     saveIndex();
+    // What we just handled becomes the new baseline, in case the old tab writes again.
+    try { localStorage.setItem(BASELINE_KEY, pending.raw); } catch { /* ignore */ }
     try { localStorage.removeItem(LEGACY_KEY); } catch { /* ignore */ }
   };
   if (action === 'discard') { done(); return 'Discarded'; }
@@ -715,7 +769,9 @@ export function resolveLegacy(action, targetId = index.activeId) {
   const since = index.migratedLegacy?.at || 0;
   const cur = targetId === index.activeId ? (loadFailure ? null : state) : readProfileState(targetId);
   if (!cur) return 'Unreadable';
-  const merged = mergeLegacyInto(cur, leg, since);
+  let base = null;
+  try { const raw = lsGet(BASELINE_KEY); base = raw ? migrate(JSON.parse(raw)) : null; } catch { base = null; }
+  const merged = mergeLegacyInto(cur, leg, since, base);
   if (targetId === index.activeId) { state = merged; if (!save()) return 'Storage full'; emit(); }
   else if (!lsSet(dataKey(targetId), JSON.stringify(merged))) return 'Storage full';
   done();

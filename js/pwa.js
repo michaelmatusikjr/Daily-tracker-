@@ -1,5 +1,37 @@
 // Service worker registration, update toast and install prompt handling.
+import { isSheetOpen, toast } from './ui.js';
+
 let deferredPrompt = null;
+const RELOAD_KEY = 'dailyTracker:reloadedFor';
+
+/** Is the user in the middle of something (open sheet, or a field with typed text)? */
+function busy() {
+  if (isSheetOpen() || document.querySelector('.onboarding')) return true;
+  const el = document.activeElement;
+  if (!el || el === document.body) return false;
+  if (el.isContentEditable) return (el.textContent || '').trim() !== '';
+  if (el.matches?.('input, textarea')) return String(el.value || '').trim() !== '';
+  return false;
+}
+
+let pendingReload = null;
+/**
+ * Reload into a new version, but never while the user is typing or has a sheet open, and at most
+ * once per target version per tab session (guards against a reload loop on a version mismatch).
+ */
+export function safeReload(target) {
+  try { if (sessionStorage.getItem(RELOAD_KEY) === target) return false; } catch { /* ignore */ }
+  const go = () => {
+    try { sessionStorage.setItem(RELOAD_KEY, target); } catch { /* ignore */ }
+    window.location.reload();
+  };
+  if (!busy()) { go(); return true; }
+  if (pendingReload) return true;
+  toast('Update ready – finishing when you’re done', { force: true, duration: 6000 });
+  pendingReload = setInterval(() => { if (!busy()) { clearInterval(pendingReload); go(); } }, 1000);
+  document.addEventListener('focusout', () => setTimeout(() => { if (pendingReload && !busy()) { clearInterval(pendingReload); go(); } }, 50));
+  return true;
+}
 const listeners = new Set();
 
 export const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
@@ -40,7 +72,7 @@ export function registerSW() {
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (refreshing || !hadController) return;
     refreshing = true;
-    window.location.reload();
+    safeReload('controller');
   });
   window.addEventListener('load', async () => {
     try {

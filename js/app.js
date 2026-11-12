@@ -13,7 +13,7 @@ import { renderStats } from './views/stats.js';
 import { renderSettings } from './views/settings.js';
 import { openQuickAdd, openHabitForm } from './forms.js';
 import { showOnboarding } from './onboarding.js';
-import { registerSW, onInstallChange } from './pwa.js';
+import { registerSW, onInstallChange, safeReload } from './pwa.js';
 import { reschedule } from './notify.js';
 import { renderWorkouts, renderExercise } from './views/workouts.js';
 import { openWorkoutForm } from './workoutForm.js';
@@ -113,12 +113,13 @@ function loadFailureCard(failure) {
 }
 
 let legacyOpen = false;
+const LEGACY_TITLE = 'Changes from an older version';
 /** An old (pre-1.3) tab kept writing after the upgrade: offer to bring those changes in. */
 async function offerLegacyMerge() {
   if (legacyOpen || !pendingLegacy()) return;
   legacyOpen = true;
   const name = getActiveProfile()?.name || 'this profile';
-  const choice = await choose('Changes from an older version',
+  const choice = await choose(LEGACY_TITLE,
     'Changes made in an older version of the app were found (probably a tab that was still open during the update). What should happen to them?', [
       { value: 'merge', label: `Merge into ${name}`, style: 'primary' },
       { value: 'add', label: 'Add as new profile', style: 'secondary' },
@@ -186,7 +187,11 @@ function init() {
     }
   });
   // Keep "now" line fresh and roll over at midnight.
+  // Re-plan reminders when notification permission changes (e.g. allowed in browser settings).
+  let lastPerm = 'Notification' in window ? Notification.permission : 'unsupported';
   setInterval(() => {
+    const perm = 'Notification' in window ? Notification.permission : 'unsupported';
+    if (perm !== lastPerm) { lastPerm = perm; reschedule(); }
     if (rollover()) reschedule();
     if (parseRoute().name === 'today' && !document.body.classList.contains('sheet-open') && !document.activeElement?.matches?.('textarea, input')) render();
   }, 60000);
@@ -227,11 +232,17 @@ function init() {
       toast(`That profile was deleted in another window. Switched to ${getActiveProfile()?.name || 'another profile'}.`, { force: true, duration: 6000 });
     }
     if (r.legacyChanged) offerLegacyMerge();
+    if (r.legacyResolved && legacyOpen) {
+      // Another window answered the same question: close ours.
+      const t = [...document.querySelectorAll('.sheet-root .sheet-title')].find((x) => x.textContent === LEGACY_TITLE);
+      t?.closest('.sheet')?.querySelector('.sheet-head .icon-btn')?.click();
+      toast('Older-version changes were handled in another window', { force: true });
+    }
     if (r.profileChanged || r.external) reschedule();
   });
   // When another tab activates a new version, reload so we never run old code against new data.
   navigator.serviceWorker?.addEventListener?.('message', (e) => {
-    if (e.data?.type === 'APP_UPDATED' && e.data.version && e.data.version !== APP_VERSION_STR) window.location.reload();
+    if (e.data?.type === 'APP_UPDATED' && e.data.version && e.data.version !== APP_VERSION_STR) safeReload(e.data.version);
   });
   if (!getState().settings.onboarded) showOnboarding();
   else if (getActiveProfile()?.introPending) setTimeout(() => openProfileEditor(getActiveProfile(), { intro: true, onDone: () => offerLegacyMerge() }), 400);
