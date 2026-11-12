@@ -1,6 +1,6 @@
 import { h, segmented, toast, confirmDialog, iconBtn, choose } from '../ui.js';
 import { icon } from '../icons.js';
-import { getState, update, replaceState, exportPayload, validateImport, defaultState, APP_VERSION, isStorageOk, getActiveProfile, getProfiles, addProfile, replaceAllProfiles } from '../store.js';
+import { getState, update, replaceState, exportPayload, validateImport, defaultState, APP_VERSION, isStorageOk, getActiveProfile, getProfiles, addProfile, replaceAllProfiles, unreadableProfiles } from '../store.js';
 import { avatarEl, openProfileEditor, openProfileMenu } from '../profiles.js';
 import { ctx } from '../ctx.js';
 import { ACCENTS } from '../theme.js';
@@ -181,9 +181,9 @@ function exportData() {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
-    toast('Backup downloaded');
+    toast('Backup downloaded', { force: true });
   } catch {
-    toast('Export failed');
+    toast('Export failed', { force: true });
   }
 }
 
@@ -200,8 +200,21 @@ async function importFile(input) {
       const ok = await confirmDialog('Replace everything?',
         `This backup has ${parsed.profiles.length} profile${parsed.profiles.length === 1 ? '' : 's'} (${names}). It will replace all profiles and data on this device.`, { ok: 'Replace all', danger: true });
       if (!ok) return;
-      parsed.profiles.forEach((p) => { p.data.settings.onboarded = true; });
-      if (!replaceAllProfiles(parsed)) { toast('Couldn’t import – this device’s storage is full'); return; }
+      // Profiles on this device that can't be read are never removed without a separate, explicit yes.
+      const stuck = unreadableProfiles(parsed.profiles.map((p) => p.id));
+      let deleteUnreadable = false;
+      if (stuck.length) {
+        const c = await choose('Keep unreadable profiles?',
+          `${stuck.map((p) => p.name).join(', ')} can’t be read on this device (a backup copy is kept). Keep ${stuck.length === 1 ? 'it' : 'them'} next to the imported profiles?`, [
+            { value: 'keep', label: 'Keep (recommended)', style: 'primary' },
+            { value: 'delete', label: 'Delete permanently', style: 'danger' },
+            { value: null, label: 'Cancel import', style: 'ghost' },
+          ]);
+        if (!c) return;
+        deleteUnreadable = c === 'delete';
+      }
+      parsed.profiles.forEach((p) => { if (p.data) p.data.settings.onboarded = true; });
+      if (!replaceAllProfiles(parsed, { deleteUnreadable })) { toast('Couldn’t import – this device’s storage is full', { force: true }); return; }
       toast('Backup imported');
       return;
     }
@@ -217,7 +230,7 @@ async function importFile(input) {
     if (choice === 'replace') { replaceState(data); toast('Backup imported'); }
     if (choice === 'add') {
       if (addProfile({ name: 'Imported', data })) toast('Backup added as profile “Imported” – rename it from the profile menu');
-      else toast('Couldn’t import – this device’s storage is full');
+      else toast('Couldn’t import – this device’s storage is full', { force: true });
     }
   } catch (e) {
     toast(e instanceof SyntaxError ? 'That file is not valid JSON' : (e.message || 'Import failed'), { duration: 6000 });

@@ -22,6 +22,20 @@ function eyebrowLabel(k, today) {
   return k.slice(0, 4) !== today.slice(0, 4) ? `${rel} · ${k.slice(0, 4)}` : rel;
 }
 
+const TIPS_KEY = 'dailyTracker:tips';
+function tipsSeen() { try { return JSON.parse(localStorage.getItem(TIPS_KEY) || '{}'); } catch { return {}; } }
+export function markTipSeen() {
+  try { localStorage.setItem(TIPS_KEY, JSON.stringify({ ...tipsSeen(), settingsMoved: true })); } catch { /* ignore */ }
+  document.querySelector('.coach-tip')?.remove();
+}
+/** One-time hint for people upgrading from a version with a Settings tab. */
+function settingsTip() {
+  if (tipsSeen().settingsMoved || !getState().settings.onboarded) return null;
+  return h('div.coach-tip', { role: 'note' },
+    h('span', '⚙️ ', h('b', 'Settings moved here.'), ' Tap your picture for settings and profiles.'),
+    h('button.link-btn', { type: 'button', onclick: () => markTipSeen() }, 'Got it'));
+}
+
 export function renderToday() {
   const st = getState();
   const k = ctx.ui.date;
@@ -37,8 +51,10 @@ export function renderToday() {
     h('div.page-head-text',
       // Avatar sits top-left beside the greeting, so the date title keeps the full width.
       h('div.eyebrow-row',
-        h('button.avatar-btn', { type: 'button', onclick: () => openProfileMenu(), 'aria-label': `Profile: ${profile.name}. Switch profile or open settings` }, avatarEl(profile, 34)),
+        h('button.avatar-btn', { type: 'button', onclick: () => { markTipSeen(); openProfileMenu(); }, 'aria-label': `Profile and settings (${profile.name})`, title: 'Profile and settings' },
+          avatarEl(profile, 34), h('span.avatar-chevron', { 'aria-hidden': 'true' }, icon('chevronDown', { size: 10 }))),
         h('p.eyebrow', isToday ? greeting() : eyebrowLabel(k, today))),
+      settingsTip(),
       // With the "Today" chip showing, narrow screens get a short date (swapped in CSS).
       h('h1.page-title',
         h('span.title-long', fmtDateLong(k)),

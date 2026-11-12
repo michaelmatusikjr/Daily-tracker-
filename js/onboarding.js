@@ -72,6 +72,7 @@ export function showOnboarding() {
     setTimeout(() => root.remove(), 250);
     const name = nameInput?.value.trim();
     if (name) updateProfile(getActiveProfile().id, { name });
+    if (firstRun) { try { localStorage.setItem('dailyTracker:tips', JSON.stringify({ settingsMoved: true })); } catch { /* ignore */ } }
     update((s) => { s.settings.onboarded = true; });
     if (completed && seed) seedExamples();
     if (prevFocus && document.contains(prevFocus)) prevFocus.focus?.();

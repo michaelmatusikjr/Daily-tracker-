@@ -1,7 +1,7 @@
 // App bootstrap: routing, rendering, timers, PWA wiring.
-import { load, subscribe, getState, getLoadFailure, resolveLoadFailure, onSaveError, getActiveProfile } from './store.js';
+import { load, subscribe, getState, getLoadFailure, resolveLoadFailure, onSaveError, onSaveOk, getActiveProfile, handleStorageEvent, pendingLegacy, resolveLegacy, isStorageOk } from './store.js';
 import { ctx } from './ctx.js';
-import { h, closeAllSheets, isSheetOpen, confirmDialog, toast } from './ui.js';
+import { h, closeAllSheets, isSheetOpen, confirmDialog, toast, choose } from './ui.js';
 import { icon } from './icons.js';
 import { applyTheme } from './theme.js';
 import { todayKey, monthStart } from './dates.js';
@@ -18,6 +18,7 @@ import { reschedule } from './notify.js';
 import { renderWorkouts, renderExercise } from './views/workouts.js';
 import { openWorkoutForm } from './workoutForm.js';
 import { openProfileEditor } from './profiles.js';
+import { APP_VERSION as APP_VERSION_STR } from './store.js';
 
 const TABS = [
   { id: 'today', label: 'Today', icon: 'today' },
@@ -25,8 +26,10 @@ const TABS = [
   { id: 'workouts', label: 'Workouts', icon: 'dumbbell' },
   { id: 'calendar', label: 'Calendar', icon: 'calendar' },
   { id: 'stats', label: 'Stats', icon: 'stats' },
+  { id: 'settings', label: 'Settings', icon: 'settings', desktopOnly: true },
 ];
-// Settings has no tab: it opens from the profile menu (avatar on Today) or #settings.
+// On phones Settings has no tab: it opens from the profile menu (avatar on Today) or #settings.
+// The wide-screen side nav also lists it.
 const TITLES = { today: 'Today', habits: 'Habits', habit: 'Habit', workouts: 'Workouts', exercise: 'Exercise', calendar: 'Calendar', stats: 'Stats', settings: 'Settings' };
 
 const main = document.getElementById('main');
@@ -42,7 +45,7 @@ function parseRoute() {
 function buildNav() {
   nav.replaceChildren(
     h('div.nav-brand', h('span.brand-mark', { 'aria-hidden': 'true' }, icon('check', { size: 16 })), h('span', 'Daily Tracker')),
-    ...TABS.map((t) => h('a.nav-item', {
+    ...TABS.map((t) => h(`a.nav-item${t.desktopOnly ? '.desktop-only' : ''}`, {
       href: '#' + t.id, dataset: { tab: t.id },
       // Tapping the Today tab always means "today" (calendar day taps set a date explicitly).
       onclick: t.id === 'today' ? () => { ctx.ui.date = todayKey(); if (parseRoute().name === 'today') render(); } : null,
@@ -107,6 +110,26 @@ function loadFailureCard(failure) {
       h('div.set-actions',
         h('button.btn.secondary.small', { type: 'button', onclick: exportRaw }, icon('download', { size: 16 }), 'Export raw data'),
         h('button.btn.danger-ghost.small', { type: 'button', onclick: reset }, icon('refresh', { size: 16 }), 'Reset'))));
+}
+
+let legacyOpen = false;
+/** An old (pre-1.3) tab kept writing after the upgrade: offer to bring those changes in. */
+async function offerLegacyMerge() {
+  if (legacyOpen || !pendingLegacy()) return;
+  legacyOpen = true;
+  const name = getActiveProfile()?.name || 'this profile';
+  const choice = await choose('Changes from an older version',
+    'Changes made in an older version of the app were found (probably a tab that was still open during the update). What should happen to them?', [
+      { value: 'merge', label: `Merge into ${name}`, style: 'primary' },
+      { value: 'add', label: 'Add as new profile', style: 'secondary' },
+      { value: 'discard', label: 'Discard', style: 'danger' },
+    ]);
+  legacyOpen = false;
+  if (!choice) return; // closed: ask again next time
+  if (choice === 'discard' && !(await confirmDialog('Discard those changes?', 'They can’t be recovered afterwards.', { ok: 'Discard', danger: true }))) { offerLegacyMerge(); return; }
+  const res = resolveLegacy(choice);
+  const msg = { Merged: `Merged into ${name}`, Added: 'Added as profile “Older version”', Discarded: 'Older changes discarded', Unreadable: 'Those changes couldn’t be read', 'Storage full': 'Couldn’t save – storage is full' }[res] || res;
+  toast(msg, { force: true });
 }
 
 function rollover() {
@@ -190,14 +213,29 @@ function init() {
   // Alarms were removed in 1.2.0: drop their leftover runtime state.
   try { localStorage.removeItem('dailyTracker:alarmRuntime'); } catch { /* ignore */ }
   // Saving can fail when the device's storage is full (e.g. many profile photos).
-  let lastSaveErr = 0;
-  onSaveError(() => {
-    if (Date.now() - lastSaveErr < 8000) return;
-    lastSaveErr = Date.now();
-    toast('Couldn’t save – this device’s storage is full. Export a backup, then remove photos or old data.', { duration: 8000 });
+  // A failed save shows a banner that stays until a save works again (success toasts are muted meanwhile).
+  const banner = document.getElementById('save-banner');
+  const showBanner = (on) => { banner.hidden = !on; };
+  onSaveError(() => showBanner(true));
+  onSaveOk(() => showBanner(false));
+  if (!isStorageOk()) showBanner(true);
+  // Changes from other tabs: the profile list, this profile's data, or an old-version tab.
+  window.addEventListener('storage', (e) => {
+    const r = handleStorageEvent(e);
+    if (!r) return;
+    if (r.deletedElsewhere) {
+      toast(`That profile was deleted in another window. Switched to ${getActiveProfile()?.name || 'another profile'}.`, { force: true, duration: 6000 });
+    }
+    if (r.legacyChanged) offerLegacyMerge();
+    if (r.profileChanged || r.external) reschedule();
+  });
+  // When another tab activates a new version, reload so we never run old code against new data.
+  navigator.serviceWorker?.addEventListener?.('message', (e) => {
+    if (e.data?.type === 'APP_UPDATED' && e.data.version && e.data.version !== APP_VERSION_STR) window.location.reload();
   });
   if (!getState().settings.onboarded) showOnboarding();
-  else if (getActiveProfile()?.introPending) setTimeout(() => openProfileEditor(getActiveProfile(), { intro: true }), 400);
+  else if (getActiveProfile()?.introPending) setTimeout(() => openProfileEditor(getActiveProfile(), { intro: true, onDone: () => offerLegacyMerge() }), 400);
+  else setTimeout(() => offerLegacyMerge(), 500);
   registerSW();
 }
 

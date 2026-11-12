@@ -1,6 +1,7 @@
 // DOM helpers and shared UI components. User text is ALWAYS set via
 // textContent / attributes (never innerHTML) to prevent XSS.
 import { icon } from './icons.js';
+import { isStorageOk } from './store.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -95,9 +96,12 @@ export function ring(pct, { size = 64, stroke = 7, color = 'var(--accent)', trac
 
 // ---------- Toasts ----------
 let toastTimer = null;
-export function toast(message, { action, onAction, duration = 4500 } = {}) {
+export function toast(message, { action, onAction, duration = 4500, force = false } = {}) {
   const host = document.getElementById('toasts');
   if (!host) return;
+  // While saving is failing (storage full) a "Saved"/"Logged" toast would be a lie: the
+  // persistent "Not saved" banner is shown instead. `force` is for messages unrelated to saving.
+  if (!force && !isStorageOk()) return;
   clearTimeout(toastTimer);
   host.replaceChildren();
   const el = h('div.toast', { role: 'status' },

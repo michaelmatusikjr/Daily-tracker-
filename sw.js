@@ -1,6 +1,6 @@
 // Daily Tracker service worker: cache-first app shell, versioned cache.
 // Bump VERSION whenever any app file changes so clients get the update.
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
 const CACHE = `daily-tracker-${VERSION}`;
 const SHELL = [
   './',
@@ -53,6 +53,9 @@ self.addEventListener('activate', (event) => {
     const keys = await caches.keys();
     await Promise.all(keys.filter((k) => k.startsWith('daily-tracker-') && k !== CACHE).map((k) => caches.delete(k)));
     await self.clients.claim();
+    // Tell every open tab a new version is live, so tabs running older code reload.
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    clients.forEach((c) => c.postMessage({ type: 'APP_UPDATED', version: VERSION }));
   })());
 });
 
