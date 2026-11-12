@@ -6,7 +6,7 @@ const RELOAD_KEY = 'dailyTracker:reloadedFor';
 
 /** Is the user in the middle of something (open sheet, or a field with typed text)? */
 function busy() {
-  if (isSheetOpen() || document.querySelector('.onboarding')) return true;
+  if (isSheetOpen()) return true;
   const el = document.activeElement;
   if (!el || el === document.body) return false;
   if (el.isContentEditable) return (el.textContent || '').trim() !== '';
@@ -19,7 +19,10 @@ let pendingReload = null;
  * Reload into a new version, but never while the user is typing or has a sheet open, and at most
  * once per target version per tab session (guards against a reload loop on a version mismatch).
  */
+let userAskedToReload = false; // the user tapped "Reload" on the update toast in this tab
+
 export function safeReload(target) {
+  if (userAskedToReload) { window.location.reload(); return true; }
   try { if (sessionStorage.getItem(RELOAD_KEY) === target) return false; } catch { /* ignore */ }
   const go = () => {
     try { sessionStorage.setItem(RELOAD_KEY, target); } catch { /* ignore */ }
@@ -60,7 +63,7 @@ function showUpdateToast(worker) {
   if (!el) return;
   el.hidden = false;
   requestAnimationFrame(() => el.classList.add('show'));
-  el.querySelector('[data-action="reload"]').onclick = () => worker.postMessage({ type: 'SKIP_WAITING' });
+  el.querySelector('[data-action="reload"]').onclick = () => { userAskedToReload = true; worker.postMessage({ type: 'SKIP_WAITING' }); };
   el.querySelector('[data-action="dismiss"]').onclick = () => { el.classList.remove('show'); setTimeout(() => { el.hidden = true; }, 250); };
 }
 
