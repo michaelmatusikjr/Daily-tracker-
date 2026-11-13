@@ -132,7 +132,7 @@ function lineParts(l, wu, settings, compact) {
 /** "225 lbs · 3 × 5" | "225 × 3×5, 245 × 1×3" | "1:30" | "30 min · 2.5 mi · 12:00/mi" */
 export function workoutSummary(w, ex, settings) {
   const parts = [];
-  if ((ex?.type || 'strength') === 'strength') {
+  if ((ex?.type || 'strength') !== 'cardio') {
     if (w.lines.length === 1) {
       const { w: wt, sr } = lineParts(w.lines[0], lineUnit(w.lines[0], w), settings, false);
       if (wt) parts.push(`${wt} ${weightLabel(settings.weightUnit)}`);
@@ -185,62 +185,113 @@ export function rankedExercises(state, today = todayKey()) {
 }
 
 // ---------- Personal records ----------
+export const STD_DISTANCES = [
+  { id: '1mi', label: '1 mi', km: 1.609344, hint: '1 mi (1.6 km)' },
+  { id: '2mi', label: '2 mi', km: 3.218688, hint: '2 mi (3.2 km)' },
+  { id: '5k', label: '5K', km: 5, hint: '5K (3.1 mi)' },
+  { id: '10k', label: '10K', km: 10, hint: '10K (6.2 mi)' },
+  { id: '10mi', label: '10 mi', km: 16.09344, hint: '10 mi (16.1 km)' },
+  { id: 'half', label: 'Half marathon', km: 21.0975, hint: 'half marathon (13.1 mi)' },
+  { id: 'full', label: 'Marathon', km: 42.195, hint: 'marathon (26.2 mi)' },
+];
+const STD_TOLERANCE = 0.02; // a logged distance within ±2% counts (no pro-rating of longer runs)
+export const stdDistanceFor = (km) => STD_DISTANCES.find((d) => Math.abs(km - d.km) / d.km <= STD_TOLERANCE) || null;
+
+/** Calendar period keys (week follows the profile's week-start setting). */
+function periodKeys(date, weekStart) {
+  return { week: startOfWeek(date, weekStart), month: date.slice(0, 7), year: date.slice(0, 4) };
+}
+
 /**
- * Walk an exercise's history in order and mark each workout that beat the previous best.
- * Derived on demand, so edits and deletes are always reflected.
- * Returns { records: Map(workoutId → [label]), best }.
+ * Personal records for one exercise, from its full history (so edits and deletes are always
+ * reflected). Entries are walked in order; an entry is a record when, after adding it, a value
+ * beats the best that existed before it. The first-ever entry is never a record, and period
+ * totals (week/month/year) need an earlier period to beat. Weights and distances are compared
+ * in the display unit after display rounding, so converted values tie instead of "winning".
+ *
+ * Returns { records: Map(workoutId → [{ kind, title, value }]), summary, list }.
+ *  Strength:   1-rep max (heaviest weight lifted for ≥ 1 rep) and 3×5 max (heaviest weight with
+ *              ≥ 3 sets of ≥ 5 reps on one day, summed across that day's lines and entries).
+ *  Bodyweight: most reps in a day / week / month / year (sets × reps summed), longest hold.
+ *  Cardio:     fastest time at each standard distance (1 mi … marathon).
  */
 export function computeRecords(state, exerciseId) {
   const ex = exerciseById(state, exerciseId);
+  const type = ex?.type || 'strength';
   const s = state.settings;
   const list = state.workouts.filter((w) => w.exerciseId === exerciseId).sort(chrono);
   const records = new Map();
-  const best = { weight: null, repsAt: new Map(), bodyReps: null, time: null, dist: null, pace: null };
-  // Compare in the display unit after the same rounding the UI uses, so converting between
-  // lb and kg can't create a fake record; equal values (ties) are not records.
-  const dispW = (kg) => Math.round(fromKg(kg, s.weightUnit) * 2) / 2;
-  const dispD = (km) => Math.round(fromKm(km, s.distanceUnit) * 100) / 100;
-  const dispPace = (secPerKm) => Math.round(secPerKm * toKm(1, s.distanceUnit)); // seconds per display unit
+  const dispW = (w, l) => Math.round(fromKg(toKg(l.weight, lineUnit(l, w)), s.weightUnit) * 2) / 2;
   const wtxt = (v) => `${trimNum(v, 1)} ${weightLabel(s.weightUnit)}`;
-  list.forEach((w, i) => {
-    const labels = [];
-    const first = i === 0;
-    for (const l of w.lines) {
-      if (l.weight > 0) {
-        const kg = toKg(l.weight, lineUnit(l, w));
-        const dw = dispW(kg);
-        if (best.weight === null || dw > best.weight.d) {
-          if (!first && best.weight !== null) labels.push(`Heaviest: ${wtxt(dw)}`);
-          best.weight = { v: kg, d: dw, date: w.date, id: w.id };
-        }
-        if (l.reps > 0) {
-          const prev = best.repsAt.get(dw);
-          if (prev !== undefined && l.reps > prev.v && !first) labels.push(`Most reps at ${wtxt(dw)}: ${l.reps}`);
-          if (prev === undefined || l.reps > prev.v) best.repsAt.set(dw, { v: l.reps, kg, date: w.date });
-        }
-      } else if (l.reps > 0) {
-        if (best.bodyReps !== null && l.reps > best.bodyReps.v && !first) labels.push(`Most reps: ${l.reps}`);
-        if (best.bodyReps === null || l.reps > best.bodyReps.v) best.bodyReps = { v: l.reps, date: w.date };
+  const add = (w, rec) => { records.set(w.id, [...(records.get(w.id) || []), rec]); };
+
+  if (type === 'strength') {
+    let best1 = null, best35 = null; // { v, date }
+    const day = new Map(); // date → { sets: Map(weight → sets of ≥5 reps), one: max weight }
+    list.forEach((w, i) => {
+      const d = day.get(w.date) || { sets: new Map(), one: null };
+      for (const l of w.lines) {
+        if (!(l.weight > 0) || !(l.reps >= 1)) continue;
+        const v = dispW(w, l);
+        d.one = Math.max(d.one ?? 0, v);
+        if (l.reps >= 5) d.sets.set(v, (d.sets.get(v) || 0) + Math.max(1, l.sets || 1));
       }
-    }
-    if (w.time > 0) {
-      if (best.time !== null && w.time > best.time.v && !first) labels.push(`Longest time: ${ex?.type === 'cardio' ? fmtLong(w.time) : fmtClock(w.time)}`);
-      if (best.time === null || w.time > best.time.v) best.time = { v: w.time, date: w.date };
-    }
-    if (w.distance > 0) {
-      const km = toKm(w.distance, w.distanceUnit);
-      const dd = dispD(km);
-      if (best.dist !== null && dd > best.dist.d && !first) labels.push(`Longest distance: ${trimNum(dd)} ${distLabel(s.distanceUnit)}`);
-      if (best.dist === null || dd > best.dist.d) best.dist = { v: km, d: dd, date: w.date };
-      if (w.time > 0) {
-        const pace = dispPace(w.time / km); // whole seconds per display unit (lower is faster)
-        if (best.pace !== null && pace < best.pace.d && !first) labels.push(`Fastest pace: ${paceText(w, s)}`);
-        if (best.pace === null || pace < best.pace.d) best.pace = { v: w.time / km, d: pace, date: w.date, w };
+      day.set(w.date, d);
+      const q = [...d.sets].filter(([, n]) => n >= 3).map(([v]) => v);
+      const d35 = q.length ? Math.max(...q) : null;
+      if (d.one !== null && (best1 === null || d.one > best1.v)) {
+        if (i > 0 && best1 !== null) add(w, { kind: '1rm', title: 'New 1-rep max', value: wtxt(d.one) });
+        best1 = { v: d.one, date: w.date };
       }
+      if (d35 !== null && (best35 === null || d35 > best35.v)) {
+        if (i > 0 && best35 !== null) add(w, { kind: '3x5', title: 'New 3×5 max', value: wtxt(d35) });
+        best35 = { v: d35, date: w.date };
+      }
+    });
+    // Days that qualified as 3×5 (for chart markers).
+    const days35 = new Set([...day].filter(([, d]) => [...d.sets.values()].some((n) => n >= 3)).map(([k]) => k));
+    return { records, list, summary: { type, oneRm: best1, threeByFive: best35, days35 } };
+  }
+
+  if (type === 'bodyweight') {
+    const totals = { day: new Map(), week: new Map(), month: new Map(), year: new Map() };
+    const best = { day: null, week: null, month: null, year: null, hold: null };
+    const names = { day: 'day', week: 'week', month: 'month', year: 'year' };
+    list.forEach((w, i) => {
+      const reps = w.lines.reduce((n, l) => n + (l.reps > 0 ? l.reps * Math.max(1, l.sets || 1) : 0), 0);
+      const keys = { day: w.date, ...periodKeys(w.date, s.weekStart) };
+      for (const p of ['day', 'week', 'month', 'year']) {
+        const total = (totals[p].get(keys[p]) || 0) + reps;
+        totals[p].set(keys[p], total);
+        if (!reps || total <= (best[p]?.v ?? 0)) continue;
+        // A record needs an earlier period to beat (and never the very first entry).
+        const others = [...totals[p]].filter(([k]) => k !== keys[p]).map(([, v]) => v);
+        if (i > 0 && others.length && total > Math.max(...others)) add(w, { kind: p, title: `Most reps in a ${names[p]}`, value: String(total) });
+        best[p] = { v: total, key: keys[p], date: w.date };
+      }
+      if (w.time > 0 && (!best.hold || w.time > best.hold.v)) {
+        if (i > 0 && best.hold) add(w, { kind: 'hold', title: 'Longest hold', value: fmtClock(w.time) });
+        best.hold = { v: w.time, date: w.date };
+      }
+    });
+    const now = periodKeys(todayKey(), s.weekStart);
+    const current = { week: totals.week.get(now.week) || 0, month: totals.month.get(now.month) || 0, year: totals.year.get(now.year) || 0 };
+    return { records, list, summary: { type, ...best, current } };
+  }
+
+  // Cardio: fastest time per standard distance.
+  const best = {};
+  list.forEach((w) => {
+    if (!(w.distance > 0) || !(w.time > 0)) return;
+    const std = stdDistanceFor(toKm(w.distance, w.distanceUnit));
+    if (!std) return;
+    const t = Math.round(w.time);
+    if (!best[std.id] || t < best[std.id].time) {
+      if (best[std.id]) add(w, { kind: std.id, title: `Fastest ${std.label}`, value: fmtClock(t) });
+      best[std.id] = { time: t, date: w.date, w };
     }
-    if (labels.length) records.set(w.id, [...new Set(labels)]);
   });
-  return { records, best, list };
+  return { records, list, summary: { type, distances: best } };
 }
 
 /** Recent records across all exercises, newest first. */
@@ -253,18 +304,20 @@ export function recentRecords(state, limit = 5) {
   return out.sort((a, b) => chrono(b.w, a.w)).slice(0, limit);
 }
 
+export const recordText = (r) => `${r.title}: ${r.value}`;
+
 // ---------- Chart data ----------
-/** Strength: top weight per day (or reps/time). Cardio: distance per day plus pace. */
+/** Strength: top weight per day (3×5 days marked). Bodyweight: reps per day. Cardio: distance + pace. */
 export function chartSeries(state, exerciseId) {
   const ex = exerciseById(state, exerciseId);
   const s = state.settings;
   const byDay = new Map();
   for (const w of state.workouts) {
     if (w.exerciseId !== exerciseId) continue;
-    const d = byDay.get(w.date) || { weight: null, reps: null, time: 0, dist: 0, paceTime: 0, paceDist: 0 };
+    const d = byDay.get(w.date) || { weight: null, reps: 0, time: 0, dist: 0, paceTime: 0, paceDist: 0 };
     for (const l of w.lines) {
-      if (l.weight > 0) d.weight = Math.max(d.weight ?? 0, fromKg(toKg(l.weight, lineUnit(l, w)), s.weightUnit));
-      if (l.reps > 0) d.reps = Math.max(d.reps ?? 0, l.reps);
+      if (l.weight > 0 && l.reps >= 1) d.weight = Math.max(d.weight ?? 0, fromKg(toKg(l.weight, lineUnit(l, w)), s.weightUnit));
+      if (l.reps > 0) d.reps += l.reps * Math.max(1, l.sets || 1);
     }
     if (w.time > 0) d.time += w.time;
     if (w.distance > 0) {
@@ -283,11 +336,12 @@ export function chartSeries(state, exerciseId) {
       time: { label: 'Time (min)', points: pts((d) => (d.time > 0 ? d.time / 60 : null)), fmt: (v) => trimNum(v, 0) },
     };
   }
-  const w = pts((d) => d.weight);
-  if (w.length) return { primary: { label: `Top weight (${weightLabel(s.weightUnit)})`, points: w, fmt: (v) => trimNum(v, 1) } };
-  const r = pts((d) => d.reps);
-  if (r.length) return { primary: { label: 'Most reps', points: r, fmt: (v) => String(Math.round(v)) } };
-  return { primary: { label: 'Time', points: pts((d) => (d.time > 0 ? d.time : null)), fmt: (v) => fmtClock(v) } };
+  if (ex?.type === 'bodyweight') {
+    return { primary: { label: 'Reps per day', points: pts((d) => d.reps || null), fmt: (v) => String(Math.round(v)) } };
+  }
+  const marks = computeRecords(state, exerciseId).summary.days35;
+  const w = pts((d) => d.weight).map((p) => ({ ...p, mark: marks.has(p.date) }));
+  return { primary: { label: `Top weight (${weightLabel(s.weightUnit)})`, points: w, fmt: (v) => trimNum(v, 1), markLabel: '3×5 day' } };
 }
 
 // ---------- Totals ----------
@@ -310,7 +364,7 @@ export function periodStats(state, today = todayKey()) {
   const weekStart = startOfWeek(today, s.weekStart);
   const monthStart = today.slice(0, 8) + '01';
   const weekDays = new Set(), monthDays = new Set();
-  let strength = 0, cardio = 0, cardioTime = 0, cardioDist = 0;
+  let strength = 0, bodyweight = 0, cardio = 0, cardioTime = 0, cardioDist = 0;
   for (const w of state.workouts) {
     if (w.date > today) continue;
     if (w.date >= weekStart) weekDays.add(w.date);
@@ -321,9 +375,10 @@ export function periodStats(state, today = todayKey()) {
       cardio++;
       cardioTime += w.time || 0;
       if (w.distance > 0) cardioDist += fromKm(toKm(w.distance, w.distanceUnit), s.distanceUnit);
-    } else strength++;
+    } else if (ex?.type === 'bodyweight') bodyweight++;
+    else strength++;
   }
-  return { week: weekDays.size, month: monthDays.size, strength, cardio, cardioTime, cardioDist };
+  return { week: weekDays.size, month: monthDays.size, strength, bodyweight, cardio, cardioTime, cardioDist };
 }
 
 export const workoutsOn = (state, date) => state.workouts.filter((w) => w.date === date);

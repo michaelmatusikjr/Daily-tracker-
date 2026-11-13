@@ -10,7 +10,12 @@ import {
 } from './workouts.js';
 
 const CARDIO_RE = /\b(run|running|jog|walk|walking|hike|cycle|cycling|bike|biking|ride|swim|swimming|row|rowing|elliptical|cardio|treadmill|stairs|skate|ski)\b/i;
-export const guessType = (name) => (CARDIO_RE.test(name) ? 'cardio' : 'strength');
+const BODY_RE = /\b(push[- ]?ups?|sit[- ]?ups?|pull[- ]?ups?|chin[- ]?ups?|dips?|planks?|burpees?|lunges?|crunch(es)?|wall[- ]?sits?|air squats?|bodyweight squats?)\b/i;
+export const guessType = (name) => (CARDIO_RE.test(name) ? 'cardio' : BODY_RE.test(name) ? 'bodyweight' : 'strength');
+const TYPE_ICON = { strength: 'dumbbell', bodyweight: 'body', cardio: 'run' };
+const TYPE_OPTIONS = [
+  { value: 'strength', label: 'Strength', icon: 'dumbbell' }, { value: 'bodyweight', label: 'Bodyweight', icon: 'body' }, { value: 'cardio', label: 'Cardio', icon: 'run' },
+];
 
 /** Number from an input: null when empty, NaN (with .why) when invalid. "2,5" is a decimal; "1,000" is rejected. */
 function parseNum(v) {
@@ -78,10 +83,10 @@ export function openWorkoutForm(workout, opts = {}) {
       const ex = newEx || exerciseById(st2, exId);
       exBox.replaceChildren(...[
         h('div.ex-selected',
-          h('span.ex-chip.selected', icon(ex.type === 'cardio' ? 'run' : 'dumbbell', { size: 18 }), h('b', ex.name)),
+          h('span.ex-chip.selected', icon(TYPE_ICON[ex.type] || 'dumbbell', { size: 18 }), h('b', ex.name)),
           isNew ? h('button.link-btn', { type: 'button', onclick: () => { exId = null; newEx = null; query = ''; renderAll(true); } }, 'Change') : null),
         newEx ? h('div.field', h('span.field-label', `What kind of exercise is “${newEx.name}”?`),
-          segmented([{ value: 'strength', label: 'Strength', icon: 'dumbbell' }, { value: 'cardio', label: 'Cardio', icon: 'run' }], newEx.type,
+          segmented(TYPE_OPTIONS, newEx.type,
             (v) => { newEx.type = v; flip = false; renderFields(); }, { label: 'Exercise type' })) : null].filter(Boolean));
       return;
     }
@@ -93,7 +98,7 @@ export function openWorkoutForm(workout, opts = {}) {
       const shown = (q ? all.filter((e) => e.name.toLowerCase().includes(q)) : all).slice(0, q ? 12 : 8);
       const exact = getState().exercises.some((e) => e.name.toLowerCase() === q);
       const items = shown.map((e) => h('button.ex-chip', { type: 'button', role: 'listitem', onclick: () => { exId = e.id; renderAll(true); } },
-        icon(e.type === 'cardio' ? 'run' : 'dumbbell', { size: 18 }), e.name));
+        icon(TYPE_ICON[e.type] || 'dumbbell', { size: 18 }), e.name));
       if (q && !exact) {
         const name = query.trim().replace(/\s+/g, ' ');
         items.push(h('button.ex-chip.add', { type: 'button', role: 'listitem', onclick: () => { newEx = { name, type: guessType(name) }; renderAll(true); } },
@@ -133,7 +138,7 @@ export function openWorkoutForm(workout, opts = {}) {
     const ex = exerciseById(st2, exId);
     if (!workout) lastLine.textContent = `Last time: ${workoutSummary(src, ex, st2.settings)} · ${fmtDateShort(src.date)}`;
     lines = src.lines.map((l) => lineFromSource(l, src));
-    timeText = timeInputValue(src.time, ex?.type || 'strength');
+    timeText = timeInputValue(src.time, ex?.type === 'cardio' ? 'cardio' : 'strength');
     if (src.distance !== null) {
       const shown = trimNum(convDist(src.distance, src.distanceUnit, du), 2);
       dist = { shown, orig: { value: src.distance, unit: src.distanceUnit, shown } };
@@ -172,29 +177,34 @@ export function openWorkoutForm(workout, opts = {}) {
     const type = exType();
     if (!exId && !newEx) { fieldsBox.replaceChildren(); lastLine.textContent = ''; timeInput = null; distStep = null; return; }
     timeInput = h('input.input', { type: 'text', inputmode: 'text', value: timeText ?? '', autocomplete: 'off', id: 'wo-time', 'aria-describedby': 'wo-time-hint' });
-    if (type === 'strength') {
+    if (type !== 'cardio') {
+      const body = type === 'bodyweight';
+      const wLabel = body ? `Extra weight (${weightLabel(wu)})` : `Weight (${weightLabel(wu)})`;
       if (!lines.length) lines.push({ weight: '', sets: '', reps: '', orig: null });
       const rows = lines.map((l, i) => {
-        const weight = stepper({ label: `Weight (${weightLabel(wu)})${i ? ` line ${i + 1}` : ''}`, value: l.weight, step: wu === 'kg' ? 2.5 : 5, decimal: true });
+        const weight = stepper({ label: `${wLabel}${i ? ` line ${i + 1}` : ''}`, value: l.weight, step: wu === 'kg' ? 2.5 : 5, decimal: true });
         const sets = stepper({ label: `Sets${i ? ` line ${i + 1}` : ''}`, value: l.sets, step: 1 });
         const reps = stepper({ label: `Reps${i ? ` line ${i + 1}` : ''}`, value: l.reps, step: 1 });
         return h('div.wo-line',
-          h('div.wo-cell.w', h('span.cell-label', i ? '' : `Weight (${weightLabel(wu)})`), weight.el),
+          h('div.wo-cell.w', h('span.cell-label', i ? '' : wLabel), weight.el),
           h('div.wo-cell', h('span.cell-label', i ? '' : 'Sets'), sets.el),
           h('div.wo-cell', h('span.cell-label', i ? '' : 'Reps'), reps.el),
           lines.length > 1 ? iconBtn('x', `Remove line ${i + 1}`, () => { captureInputs(); lines.splice(i, 1); renderFields(); }, 'line-remove') : null);
       });
       timeInput.placeholder = 'e.g. 1:30 or 45';
-      const hint = timeHint('strength');
-      hint.id = 'wo-time-hint';
-      fieldsBox.replaceChildren(
+      const hint = body ? timeHint('strength') : null;
+      if (hint) hint.id = 'wo-time-hint';
+      // Strength has no time box; an older strength entry's stored time is kept and shown here.
+      const keptTime = !body && workout?.time > 0 ? h('p.field-hint', `Logged time ${timeInputValue(workout.time, 'strength')} is kept. For holds like planks, use a Bodyweight exercise.`) : null;
+      fieldsBox.replaceChildren(...[
         h(`div.wo-lines${lines.length === 1 ? '.single' : ''}`, rows),
         h('button.btn.ghost.small.add-line', {
           type: 'button',
           onclick: () => { captureInputs(); lines.push({ weight: '', sets: '', reps: '', orig: null }); renderFields(); fieldsBox.querySelectorAll('.wo-line')[lines.length - 1]?.querySelector('input')?.focus(); },
         }, icon('plus', { size: 16 }), 'Add another line'),
-        h('div.field.compact', h('label.field-label', { for: 'wo-time' }, 'Time (optional, m:ss)'), timeInput, hint),
-        h('p.field-hint', 'Leave weight empty for bodyweight exercises.'));
+        body ? h('div.field.compact', h('label.field-label', { for: 'wo-time' }, 'Hold time (optional, m:ss)'), timeInput, hint) : keptTime,
+        body ? h('p.field-hint', 'Extra weight is optional (e.g. a weight vest).') : null].filter(Boolean));
+      if (!body) timeInput = null;
       distStep = null;
     } else {
       timeInput.placeholder = 'Minutes, m:ss or h:mm';
@@ -231,7 +241,7 @@ export function openWorkoutForm(workout, opts = {}) {
     const type = exType();
     const fail = (msg) => { err.textContent = msg; return null; };
     const outLines = [];
-    if (type === 'strength') {
+    if (type !== 'cardio') {
       for (const l of lines) {
         const wt = parseNum(l.weight), sets = parseNum(l.sets), reps = parseNum(l.reps);
         if ([wt, sets, reps].some((v) => Number.isNaN(v))) return fail(parseNum.why);
@@ -245,9 +255,13 @@ export function openWorkoutForm(workout, opts = {}) {
         if ([line.weight, line.sets, line.reps].some((v) => v > 0)) outLines.push({ ...line, unit });
       }
     }
-    const tr = readTime(timeText, type, flip);
-    if (tr.error) { timeInput?.focus(); return fail(tr.error); }
-    const time = tr.sec;
+    let time = null;
+    if (type === 'strength') time = workout?.time > 0 ? workout.time : null; // no time box: keep what was stored
+    else {
+      const tr = readTime(timeText, type === 'cardio' ? 'cardio' : 'strength', flip);
+      if (tr.error) { timeInput?.focus(); return fail(tr.error); }
+      time = tr.sec;
+    }
     let distance = null, distanceUnit = du;
     if (type === 'cardio' && dist) {
       const dv = parseNum(dist.shown);
@@ -257,7 +271,7 @@ export function openWorkoutForm(workout, opts = {}) {
       if (distance !== null && distance > CAPS.distance) return fail(`Distance looks too high (max ${CAPS.distance}).`);
     }
     if (!outLines.length && !(time > 0) && !(distance > 0)) {
-      return fail(type === 'cardio' ? 'Enter a time or a distance.' : 'Enter at least a weight, sets, reps or a time.');
+      return fail({ cardio: 'Enter a time or a distance.', bodyweight: 'Enter sets, reps or a hold time.' }[type] || 'Enter a weight, sets or reps.');
     }
     // One unit for the entry; a line keeps its own unit only if it differs (unchanged, logged in the other unit).
     const units = [...new Set(outLines.filter((l) => l.weight !== null).map((l) => l.unit))];

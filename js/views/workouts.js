@@ -7,12 +7,18 @@ import { ctx } from '../ctx.js';
 import { fmt, fmtDateShort, relativeLabel } from '../dates.js';
 import {
   computeRecords, exerciseById, workoutSummary, periodStats, exerciseTotals, chartSeries,
-  fmtClock, fmtLong, trimNum, fromKg, fromKm, weightLabel, distLabel, paceText,
+  fmtClock, fmtLong, trimNum, weightLabel, distLabel, paceText, recordText, STD_DISTANCES,
 } from '../workouts.js';
 import { openWorkoutForm } from '../workoutForm.js';
 import { deleteWorkout, deleteExercise, resyncExerciseDates } from '../actions.js';
 
-const typeIcon = (ex) => icon(ex?.type === 'cardio' ? 'run' : 'dumbbell', { size: 18 });
+export const TYPE_ICON = { strength: 'dumbbell', bodyweight: 'body', cardio: 'run' };
+export const TYPE_NAME = { strength: 'Strength', bodyweight: 'Bodyweight', cardio: 'Cardio' };
+export const typeIcon = (ex, size = 18) => icon(TYPE_ICON[ex?.type] || 'dumbbell', { size });
+const TYPE_OPTIONS = [
+  { value: 'strength', label: 'Strength', icon: 'dumbbell' }, { value: 'bodyweight', label: 'Bodyweight', icon: 'body' }, { value: 'cardio', label: 'Cardio', icon: 'run' },
+];
+export { TYPE_OPTIONS };
 const dayLabel = (k) => fmt(k, { weekday: 'short', month: 'short', day: 'numeric' });
 
 function allRecords(st) {
@@ -23,7 +29,8 @@ function allRecords(st) {
 
 function prBadge(labels) {
   if (!labels) return null;
-  return h('span.pr-badge', { title: labels.join(' · '), 'aria-label': `Personal record: ${labels.join(', ')}` }, '🏆');
+  const text = labels.map(recordText);
+  return h('span.pr-badge', { title: text.join(' · '), 'aria-label': `Personal record: ${text.join(', ')}` }, '🏆');
 }
 
 /** One workout entry row: tap to edit, trash to delete (with Undo). */
@@ -44,7 +51,7 @@ function entryRow(w, st, records, { showName = true } = {}) {
 function matchesFilter(w, f, st) {
   if (f === 'all') return true;
   const ex = exerciseById(st, w.exerciseId);
-  if (f === 'strength' || f === 'cardio') return (ex?.type || 'strength') === f;
+  if (f in TYPE_NAME) return (ex?.type || 'strength') === f;
   return f === 'ex:' + w.exerciseId;
 }
 
@@ -75,7 +82,7 @@ export function renderWorkouts() {
     onclick: () => { ctx.ui.workoutFilter = value; ctx.ui.workoutDays = 30; ctx.rerender(); },
   }, ic, label);
   root.append(h('div.filter-row.no-swipe', { role: 'group', 'aria-label': 'Filter workouts' },
-    chip('all', 'All'), chip('strength', 'Strength', icon('dumbbell', { size: 14 })), chip('cardio', 'Cardio', icon('run', { size: 14 })),
+    chip('all', 'All'), ...TYPE_OPTIONS.map((o) => chip(o.value, o.label, icon(o.icon, { size: 14 }))),
     exChips.map((e) => chip('ex:' + e.id, e.name))));
 
   if (f.startsWith('ex:')) {
@@ -117,40 +124,23 @@ export function renderExercise(id) {
     return root;
   }
   const s = st.settings;
-  const { best, records, list } = computeRecords(st, id);
+  const { summary, records, list } = computeRecords(st, id);
   const tot = exerciseTotals(st, id);
   root.append(h('header.page-head.detail-head',
     iconBtn('arrowLeft', 'Back to workouts', () => ctx.go('workouts')),
     h('div.page-head-text',
-      h('p.eyebrow', `${ex.type === 'cardio' ? 'Cardio' : 'Strength'}${ex.archived ? ' · Archived' : ''}`),
+      h('p.eyebrow', `${TYPE_NAME[ex.type] || 'Strength'}${ex.archived ? ' · Archived' : ''}`),
       h('h1.page-title', ex.name)),
     iconBtn('edit', `Edit ${ex.name}`, () => openExerciseEditor(ex))));
   root.append(h('button.btn.primary.block.log-btn', { type: 'button', onclick: () => openWorkoutForm(null, { exerciseId: id }) }, icon('plus', { size: 20 }), `Log ${ex.name}`));
 
   if (!list.length) {
-    root.append(h('section.card', emptyState(ex.type === 'cardio' ? '🏃' : '🏋️', 'No history yet', 'Log this exercise to see records and progress.')));
+    root.append(h('section.card', emptyState({ cardio: '🏃', bodyweight: '🤸' }[ex.type] || '🏋️', 'No history yet', 'Log this exercise to see records and progress.')));
     return root;
   }
 
   // Personal records
-  const wt = (kg) => `${trimNum(Math.round(fromKg(kg, s.weightUnit) * 2) / 2, 1)} ${weightLabel(s.weightUnit)}`;
-  const cards = [];
-  if (ex.type === 'cardio') {
-    if (best.dist) cards.push(statCard(`${trimNum(fromKm(best.dist.v, s.distanceUnit))} ${distLabel(s.distanceUnit)}`, 'Longest distance', fmtDateShort(best.dist.date)));
-    if (best.time) cards.push(statCard(fmtLong(best.time.v), 'Longest time', fmtDateShort(best.time.date)));
-    if (best.pace) cards.push(statCard(paceText(best.pace.w, s), 'Fastest pace', fmtDateShort(best.pace.date)));
-  } else {
-    if (best.weight) {
-      cards.push(statCard(wt(best.weight.v), 'Heaviest', fmtDateShort(best.weight.date)));
-      const atTop = [...best.repsAt.values()].sort((a, b) => b.kg - a.kg)[0];
-      const mostReps = [...best.repsAt.values()].sort((a, b) => b.v - a.v || b.kg - a.kg)[0];
-      if (atTop) cards.push(statCard(`${atTop.v} reps`, `Most reps at ${wt(atTop.kg)}`, fmtDateShort(atTop.date)));
-      if (mostReps && mostReps !== atTop) cards.push(statCard(`${mostReps.v} reps`, `Most reps (at ${wt(mostReps.kg)})`, fmtDateShort(mostReps.date)));
-    }
-    if (best.bodyReps) cards.push(statCard(`${best.bodyReps.v} reps`, 'Most reps (bodyweight)', fmtDateShort(best.bodyReps.date)));
-    if (best.time) cards.push(statCard(fmtClock(best.time.v), 'Longest time', fmtDateShort(best.time.date)));
-  }
-  if (cards.length) root.append(h('section.section', h('div.section-head', h('h2.section-title', '🏆 Personal records')), h('div.stat-grid', cards)));
+  root.append(recordsCard(ex, summary, s));
 
   // Totals
   const totals = [statCard(String(tot.sessions), tot.sessions === 1 ? 'Day logged' : 'Days logged')];
@@ -160,6 +150,7 @@ export function renderExercise(id) {
   } else {
     if (tot.sets) totals.push(statCard(String(tot.sets), 'Total sets'));
     if (tot.reps) totals.push(statCard(String(tot.reps), 'Total reps'));
+    if (ex.type === 'bodyweight' && tot.time) totals.push(statCard(fmtClock(tot.time), 'Total hold time'));
   }
   root.append(h('section.section', h('div.section-head', h('h2.section-title', 'Totals')), h('div.stat-grid', totals)));
 
@@ -175,8 +166,8 @@ export function renderExercise(id) {
     { value: 'primary', label: 'Distance' }, { value: 'pace', label: 'Pace' }, { value: 'time', label: 'Time' },
   ], key, (v) => { ctx.ui.exChart = v; ctx.rerender(); }, { label: 'Chart', small: true }) : null;
   root.append(h('section.card.chart-card',
-    h('div.section-head', h('div', h('h2.section-title', cur.label), h('p.muted.small', cur.points.length ? `${cur.points.length} day${cur.points.length === 1 ? '' : 's'}` : 'No data')), toggle),
-    cur.points.length ? lineChart(cur.points, cur.fmt) : h('p.hint-line', 'Nothing to chart yet.'),
+    h('div.section-head', h('div', h('h2.section-title', cur.label), h('p.muted.small', cur.points.length ? `${cur.points.length} day${cur.points.length === 1 ? '' : 's'}${cur.markLabel && cur.points.some((p) => p.mark) ? ' · ◆ = 3×5 day' : ''}` : 'No data')), toggle),
+    cur.points.length ? lineChart(cur.points, cur.fmt, cur.markLabel) : h('p.hint-line', 'Nothing to chart yet.'),
     h('table.sr-only', h('caption', cur.label), h('tbody', cur.points.map((p) => h('tr', h('th', { scope: 'row' }, fmtDateShort(p.date)), h('td', cur.fmt(p.v))))))));
 
   // History
@@ -187,7 +178,7 @@ export function renderExercise(id) {
 }
 
 /** Simple single-series line chart (inline SVG) with a point tooltip per day. */
-function lineChart(points, fmtV) {
+function lineChart(points, fmtV, markLabel = '') {
   const mainW = document.getElementById('main')?.clientWidth || 360;
   const W = Math.round(Math.max(280, Math.min(680, mainW - 66))), H = 170, padL = 46, padR = 10, padT = 10, padB = 24;
   const iw = W - padL - padR, ih = H - padT - padB;
@@ -205,13 +196,53 @@ function lineChart(points, fmtV) {
       s('text', { x: padL - 6, y: y(v) + 3, class: 'axis', 'text-anchor': 'end' }, fmtV(v)));
   }
   if (points.length > 1) svg.append(s('path', { class: 'line', d: points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ') }));
-  points.forEach((p, i) => svg.append(s('g', { class: 'pt' },
-    s('title', {}, `${fmtDateShort(p.date)}: ${fmtV(p.v)}`),
+  points.forEach((p, i) => svg.append(s('g', { class: `pt${p.mark ? ' marked' : ''}` },
+    s('title', {}, `${fmtDateShort(p.date)}: ${fmtV(p.v)}${p.mark ? ` · ${markLabel}` : ''}`),
     s('circle', { cx: x(i), cy: y(p.v), r: 12, class: 'hit' }),
-    s('circle', { cx: x(i), cy: y(p.v), r: 4, class: 'dot' }))));
+    p.mark ? s('rect', { x: x(i) - 5, y: y(p.v) - 5, width: 10, height: 10, rx: 2, class: 'mark', transform: `rotate(45 ${x(i)} ${y(p.v)})` }) : s('circle', { cx: x(i), cy: y(p.v), r: 4, class: 'dot' }))));
   svg.append(s('text', { x: padL, y: H - 6, class: 'axis' }, fmtDateShort(points[0].date)));
   if (points.length > 1) svg.append(s('text', { x: W - padR, y: H - 6, class: 'axis', 'text-anchor': 'end' }, fmtDateShort(points[points.length - 1].date)));
   return svg;
+}
+
+/** Records card by type. */
+function recordsCard(ex, sum, s) {
+  const wt = (v) => `${trimNum(v, 1)} ${weightLabel(s.weightUnit)}`;
+  const cell = (value, label, sub) => statCard(value ?? '—', label, sub);
+  const card = h('section.section', h('div.section-head', h('h2.section-title', '🏆 Records')));
+  if (sum.type === 'strength') {
+    card.append(h('div.stat-grid',
+      cell(sum.oneRm && wt(sum.oneRm.v), '1-rep max', sum.oneRm ? fmtDateShort(sum.oneRm.date) : 'Log a lift'),
+      cell(sum.threeByFive && wt(sum.threeByFive.v), '3×5 max', sum.threeByFive ? fmtDateShort(sum.threeByFive.date) : '3 sets of 5+ reps at one weight')));
+    return card;
+  }
+  if (sum.type === 'bodyweight') {
+    const period = (p, label) => {
+      const b = sum[p];
+      const so = p !== 'day' && sum.current[p] ? `This ${p} so far: ${sum.current[p]}` : null;
+      return cell(b ? `${b.v} reps` : null, `Most in a ${label}`, [b ? (p === 'day' ? fmtDateShort(b.date) : null) : null, so].filter(Boolean).join(' · ') || null);
+    };
+    card.append(h('div.stat-grid', period('day', 'day'), period('week', 'week'), period('month', 'month'), period('year', 'year'),
+      sum.hold ? cell(fmtClock(sum.hold.v), 'Longest hold', fmtDateShort(sum.hold.date)) : null));
+    return card;
+  }
+  // Cardio: fastest time per standard distance
+  const rows = STD_DISTANCES.filter((d) => sum.distances[d.id]);
+  const missing = STD_DISTANCES.find((d) => !sum.distances[d.id]);
+  card.append(h('div.card.dist-records',
+    rows.length ? h('table.dist-table',
+      h('thead', h('tr', h('th', { scope: 'col' }, 'Distance'), h('th', { scope: 'col' }, 'Time'), h('th', { scope: 'col' }, 'Pace'), h('th', { scope: 'col' }, 'Date'))),
+      h('tbody', rows.map((d) => { const b = sum.distances[d.id]; return h('tr', h('th', { scope: 'row' }, d.label), h('td', fmtClock(b.time)), h('td', paceText(b.w, s)), h('td', fmtDateShort(b.date))); })))
+      : null,
+    missing ? h('p.muted.small', `Log a ${missing.hint} to set a record.`) : null));
+  return card;
+}
+
+/** Strength exercise whose entries look like bodyweight work (time-only or no weight). */
+function looksBodyweight(st, e) {
+  if (e.type !== 'strength') return false;
+  const ws = st.workouts.filter((w) => w.exerciseId === e.id);
+  return ws.length > 0 && ws.some((w) => w.time > 0 || !w.lines.some((l) => l.weight > 0));
 }
 
 // ---------------- Exercise management ----------------
@@ -224,7 +255,8 @@ export function openExerciseManager() {
     ? h('ul.ex-manage', sorted.map((e) => h(`li${e.archived ? '.archived' : ''}`,
       h('button.ex-manage-row', { type: 'button', onclick: () => { sheet.close(); openExerciseEditor(e); }, 'aria-label': `Edit ${e.name}` },
         typeIcon(e),
-        h('span.ex-manage-text', h('b', e.name), h('small', `${e.type === 'cardio' ? 'Cardio' : 'Strength'} · ${counts.get(e.id) || 0} logged${e.archived ? ' · Archived' : ''}`)),
+        h('span.ex-manage-text', h('b', e.name), h('small', `${TYPE_NAME[e.type] || 'Strength'} · ${counts.get(e.id) || 0} logged${e.archived ? ' · Archived' : ''}`),
+          looksBodyweight(st, e) ? h('small.ex-hint', 'Has time-only or no-weight entries – Bodyweight may fit better.') : null),
         icon('chevronRight', { size: 18 })))))
     : h('p.hint-line', 'No exercises yet. They’re created when you log a workout, or add one here.');
   const sheet = openSheet({
@@ -276,8 +308,8 @@ export function openExerciseEditor(ex) {
   const content = h('form.form', { onsubmit: (e) => { e.preventDefault(); save(); }, novalidate: true },
     h('div.field', h('label.field-label', 'Name'), name, !isNew ? h('p.field-hint', 'Renaming keeps all history.') : null),
     h('div.field', { role: 'group', 'aria-label': 'Type' }, h('span.field-label', 'Type'),
-      segmented([{ value: 'strength', label: 'Strength', icon: 'dumbbell' }, { value: 'cardio', label: 'Cardio', icon: 'run' }], type, (v) => { type = v; }, { label: 'Type' }),
-      h('p.field-hint', 'Strength: weight, sets, reps (+ optional time). Cardio: time and distance.')),
+      segmented(TYPE_OPTIONS, type, (v) => { type = v; }, { label: 'Type', small: true }),
+      h('p.field-hint', 'Strength: weight, sets, reps. Bodyweight: sets, reps, optional weight vest and hold time. Cardio: time and distance. Changing the type keeps all history.')),
     !isNew ? h('div.set-row.compact', h('div.set-text', h('span.set-label', 'Archived'), h('span.set-desc', 'Hidden from quick picks; history is kept.')), arch) : null,
     err);
   const footer = [

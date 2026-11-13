@@ -313,7 +313,7 @@ export function saveWorkout(data, { newExercise = null } = {}) {
   update((s) => {
     if (newExercise) {
       exerciseId = uid();
-      s.exercises.push({ id: exerciseId, name: newExercise.name.slice(0, 60), type: newExercise.type === 'cardio' ? 'cardio' : 'strength', archived: false, createdAt: Date.now() });
+      s.exercises.push({ id: exerciseId, name: newExercise.name.slice(0, 60), type: ['cardio', 'bodyweight'].includes(newExercise.type) ? newExercise.type : 'strength', archived: false, createdAt: Date.now() });
     }
     const entry = { ...data, exerciseId };
     const existing = id && s.workouts.find((w) => w.id === id);
@@ -332,7 +332,8 @@ export function saveWorkout(data, { newExercise = null } = {}) {
   if (labels) {
     ctx.anim.add('w-' + id);
     haptic([20, 40, 20]);
-    toast(`🏆 New record! ${ex.name} · ${labels[0]}`, { ...undo, duration: 6000 });
+    // e.g. '🏆 New 3×5 max: Squat 235 lbs' or '🏆 Fastest 5K: Run 24:50'
+    toast(`🏆 ${labels[0].title}: ${ex.name} ${labels[0].value}`, { ...undo, duration: 6000 });
   } else {
     toast(`${data.id ? 'Saved' : 'Logged'} ${ex.name} · ${workoutSummary(w, ex, st.settings)}`, undo);
   }

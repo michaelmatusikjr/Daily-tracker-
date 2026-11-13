@@ -76,7 +76,7 @@ export function renderSettings() {
       h('div.set-text', h('span.set-label', 'Check off a habit when I log a workout'),
         h('span.set-desc', checkHabits.length ? 'Optional. Logging a matching workout checks the habit for that day; removing the workout un-checks it unless you checked it yourself.' : 'Optional. Create a check-off habit (e.g. “Exercise”) to use this.')),
       habitSel,
-      linkedOk ? segmented([{ value: 'any', label: 'Any workout' }, { value: 'strength', label: 'Strength' }, { value: 'cardio', label: 'Cardio' }], wh.filter,
+      linkedOk ? segmented([{ value: 'any', label: 'Any workout' }, { value: 'strength', label: 'Strength' }, { value: 'bodyweight', label: 'Bodyweight' }, { value: 'cardio', label: 'Cardio' }], wh.filter,
         (val) => setWorkoutHabit(wh.habitId, val), { label: 'Which workouts count', small: true }) : null,
       h('p.field-hint', 'Only check-off habits can be linked. Changing the habit removes the old habit’s automatic checks; your own checks stay.'))));
 

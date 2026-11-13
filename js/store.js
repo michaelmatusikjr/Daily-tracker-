@@ -2,7 +2,7 @@
 // Several profiles: an index key plus one data key per profile.
 import { todayKey, isValidKey } from './dates.js';
 
-export const APP_VERSION = '1.3.3';
+export const APP_VERSION = '1.4.0';
 export const SCHEMA_VERSION = 4;
 const LEGACY_KEY = 'dailyTracker:data'; // single-profile data before 1.3.0
 const PROFILES_KEY = 'dailyTracker:profiles';
@@ -140,7 +140,7 @@ function normExercise(e) {
   if (!isObj(e) || !str(e.name).trim()) return null;
   return {
     id: str(e.id, 40) || uid(), name: str(e.name, 60).trim(),
-    type: e.type === 'cardio' ? 'cardio' : 'strength',
+    type: ['cardio', 'bodyweight'].includes(e.type) ? e.type : 'strength', // unknown types become strength
     archived: !!e.archived, createdAt: Number.isFinite(e.createdAt) ? e.createdAt : Date.now(),
   };
 }
@@ -187,7 +187,7 @@ function normWorkoutData(data, out) {
   // Workout → habit link: only an active checkbox habit; anything else falls back to None.
   const wh = isObj(s.workoutHabit) ? s.workoutHabit : {};
   const linked = out.habits.find((x) => x.id === wh.habitId && !x.archived && x.goal.type === 'check');
-  s.workoutHabit = { habitId: linked ? linked.id : null, filter: ['strength', 'cardio'].includes(wh.filter) ? wh.filter : 'any' };
+  s.workoutHabit = { habitId: linked ? linked.id : null, filter: ['strength', 'bodyweight', 'cardio'].includes(wh.filter) ? wh.filter : 'any' };
   const habitIds = new Set(out.habits.map((x) => x.id));
   out.autoHabit = {};
   if (isObj(data.autoHabit)) {

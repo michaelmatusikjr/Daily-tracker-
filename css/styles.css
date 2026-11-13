@@ -1114,3 +1114,19 @@ input[type="date"].input, input[type="time"].input { min-width: 0; }
 .time-hint:not(:disabled) { color: var(--accent); text-decoration: underline dotted; cursor: pointer; }
 .time-hint:disabled { cursor: default; }
 .time-hint.error { color: var(--danger); }
+
+/* 1.4.0: three exercise types + records */
+.split-b { background: color-mix(in srgb, var(--accent) 70%, var(--surface-3)); }
+.split-c { background: color-mix(in srgb, var(--accent) 38%, var(--surface-3)); }
+.lg-b { width: 10px; height: 10px; border-radius: 3px; display: inline-block; background: color-mix(in srgb, var(--accent) 70%, var(--surface-3)); }
+.lg-c { background: color-mix(in srgb, var(--accent) 38%, var(--surface-3)); }
+.split-legend { flex-wrap: wrap; gap: var(--s2) var(--s4); }
+.ex-hint { color: var(--warn) !important; }
+.dist-records { padding: var(--s3) var(--s4); }
+.dist-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 14px; }
+.dist-table th, .dist-table td { text-align: left; padding: 8px 4px; border-bottom: 1px solid var(--border); }
+.dist-table thead th { font-size: 12px; color: var(--text-3); font-weight: 650; }
+.dist-table tbody th { font-weight: 650; }
+.dist-table tr:last-child th, .dist-table tr:last-child td { border-bottom: none; }
+.dist-records .muted { margin-top: var(--s2); }
+.line-chart .mark { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
