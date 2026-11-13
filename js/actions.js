@@ -4,7 +4,7 @@ import { ctx } from './ctx.js';
 import { toast, haptic, choose } from './ui.js';
 import { isRecurring, isTaskDone, habitTarget, habitVal, dayProgress } from './logic.js';
 import { todayKey } from './dates.js';
-import { syncHabitLink, computeRecords, exerciseById, workoutSummary } from './workouts.js';
+import { syncHabitLink, computeRecords, exerciseById, workoutSummary, recordToast } from './workouts.js';
 
 function celebrateIfDone(k, before, undo = null) {
   const after = dayProgress(getState(), k);
@@ -308,6 +308,9 @@ function restoreSnapshot(snap) {
 export function saveWorkout(data, { newExercise = null } = {}) {
   const snap = workoutSnapshot(getState());
   let id = data.id;
+  // Records this entry already held, so re-saving it (or changing only a note/date) doesn't celebrate again.
+  const before = getState().workouts.find((w) => w.id === id);
+  const had = before ? computeRecords(getState(), before.exerciseId).records.get(id) || [] : [];
   let exerciseId = data.exerciseId;
   let oldDate = null;
   update((s) => {
@@ -327,13 +330,14 @@ export function saveWorkout(data, { newExercise = null } = {}) {
   const st = getState();
   const w = st.workouts.find((x) => x.id === id);
   const ex = exerciseById(st, exerciseId);
-  const labels = computeRecords(st, exerciseId).records.get(id);
+  const labels = (computeRecords(st, exerciseId).records.get(id) || [])
+    .filter((r) => !had.some((o) => o.kind === r.kind && o.value === r.value));
   const undo = { action: 'Undo', onAction: () => restoreSnapshot(snap) };
-  if (labels) {
+  if (labels.length) {
     ctx.anim.add('w-' + id);
     haptic([20, 40, 20]);
     // e.g. '🏆 New 3×5 max: Squat 235 lbs' or '🏆 Fastest 5K: Run 24:50'
-    toast(`🏆 ${labels[0].title}: ${ex.name} ${labels[0].value}`, { ...undo, duration: 6000 });
+    toast(recordToast(labels, ex.name), { ...undo, duration: 6000 });
   } else {
     toast(`${data.id ? 'Saved' : 'Logged'} ${ex.name} · ${workoutSummary(w, ex, st.settings)}`, undo);
   }

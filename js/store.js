@@ -2,7 +2,7 @@
 // Several profiles: an index key plus one data key per profile.
 import { todayKey, isValidKey } from './dates.js';
 
-export const APP_VERSION = '1.4.0';
+export const APP_VERSION = '1.4.1';
 export const SCHEMA_VERSION = 4;
 const LEGACY_KEY = 'dailyTracker:data'; // single-profile data before 1.3.0
 const PROFILES_KEY = 'dailyTracker:profiles';
@@ -140,7 +140,8 @@ function normExercise(e) {
   if (!isObj(e) || !str(e.name).trim()) return null;
   return {
     id: str(e.id, 40) || uid(), name: str(e.name, 60).trim(),
-    type: ['cardio', 'bodyweight'].includes(e.type) ? e.type : 'strength', // unknown types become strength
+    // Case-insensitive; unknown types are resolved after the workouts are read (see normWorkoutData).
+    type: ['strength', 'cardio', 'bodyweight'].includes(str(e.type).trim().toLowerCase()) ? str(e.type).trim().toLowerCase() : null,
     archived: !!e.archived, createdAt: Number.isFinite(e.createdAt) ? e.createdAt : Date.now(),
   };
 }
@@ -177,6 +178,11 @@ function normWorkoutData(data, out) {
   if (!['mi', 'km'].includes(s.distanceUnit)) s.distanceUnit = 'mi';
   out.exercises = dedupeIds((Array.isArray(data.exercises) ? data.exercises : []).map(normExercise).filter(Boolean)).slice(0, 500);
   out.workouts = dedupeIds((Array.isArray(data.workouts) ? data.workouts : []).map(normWorkout).filter(Boolean)).slice(-20000);
+  // Unknown type: Cardio when any of its entries has a distance, otherwise Strength.
+  for (const e of out.exercises) {
+    if (e.type) continue;
+    e.type = out.workouts.some((w) => w.exerciseId === e.id && w.distance > 0) ? 'cardio' : 'strength';
+  }
   // A workout pointing at a missing exercise gets a placeholder exercise, so no history is lost.
   const known = new Set(out.exercises.map((e) => e.id));
   for (const w of out.workouts) {

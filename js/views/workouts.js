@@ -81,9 +81,9 @@ export function renderWorkouts() {
     type: 'button', 'aria-pressed': String(f === value),
     onclick: () => { ctx.ui.workoutFilter = value; ctx.ui.workoutDays = 30; ctx.rerender(); },
   }, ic, label);
-  root.append(h('div.filter-row.no-swipe', { role: 'group', 'aria-label': 'Filter workouts' },
-    chip('all', 'All'), ...TYPE_OPTIONS.map((o) => chip(o.value, o.label, icon(o.icon, { size: 14 }))),
-    exChips.map((e) => chip('ex:' + e.id, e.name))));
+  root.append(h('div.wo-filters', { role: 'group', 'aria-label': 'Filter workouts' },
+    h('div.filter-wrap', chip('all', 'All'), ...TYPE_OPTIONS.map((o) => chip(o.value, o.label, icon(o.icon, { size: 14 })))),
+    exChips.length ? h('div.filter-row.ex-filter-row.no-swipe', exChips.map((e) => chip('ex:' + e.id, e.name))) : null));
 
   if (f.startsWith('ex:')) {
     const ex = exerciseById(st, f.slice(3));

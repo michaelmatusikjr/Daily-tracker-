@@ -215,6 +215,21 @@ function periodKeys(date, weekStart) {
  *  Bodyweight: most reps in a day / week / month / year (sets × reps summed), longest hold.
  *  Cardio:     fastest time at each standard distance (1 mi … marathon).
  */
+// Priority when one entry sets several records: 3×5 before 1RM; year, month, week, day, hold;
+// cardio: longest distance first.
+const REC_RANK = { '3x5': 0, '1rm': 1, year: 0, month: 1, week: 2, day: 3, hold: 4 };
+const recRank = (k) => REC_RANK[k] ?? -STD_DISTANCES.findIndex((d) => d.id === k);
+function sortRecords(records) { for (const v of records.values()) v.sort((a, b) => recRank(a.kind) - recRank(b.kind)); }
+
+/** Toast text naming every record an entry set, e.g. "🏆 New 3×5 max & 1-rep max: Squat 235 lbs". */
+export function recordToast(labels, name) {
+  const [a, b] = labels;
+  if (labels.length === 1) return `🏆 ${a.title}: ${name} ${a.value}`;
+  if (labels.length === 2 && a.value === b.value) return `🏆 ${a.title} & ${b.title.replace(/^New /, '')}: ${name} ${a.value}`;
+  if (labels.length === 2) return `🏆 ${a.title}: ${name} ${a.value} · ${b.title.replace(/^New /, '')} ${b.value}`;
+  return `🏆 ${a.title}: ${name} ${a.value} +${labels.length - 1} more`;
+}
+
 export function computeRecords(state, exerciseId) {
   const ex = exerciseById(state, exerciseId);
   const type = ex?.type || 'strength';
@@ -227,29 +242,39 @@ export function computeRecords(state, exerciseId) {
 
   if (type === 'strength') {
     let best1 = null, best35 = null; // { v, date }
-    const day = new Map(); // date → { sets: Map(weight → sets of ≥5 reps), one: max weight }
+    // date → { sets: Map(kg rounded to 0.01 → { n: sets of ≥5 reps, v: display weight }), one: max display weight }
+    // Sets are grouped by the stored weight in kg (so 225 lb and 102.06 kg combine, 101.25 and 101.5 kg don't);
+    // records are still compared in the display unit, so display-unit ties are not records.
+    const day = new Map();
     list.forEach((w, i) => {
       const d = day.get(w.date) || { sets: new Map(), one: null };
       for (const l of w.lines) {
         if (!(l.weight > 0) || !(l.reps >= 1)) continue;
         const v = dispW(w, l);
         d.one = Math.max(d.one ?? 0, v);
-        if (l.reps >= 5) d.sets.set(v, (d.sets.get(v) || 0) + Math.max(1, l.sets || 1));
+        if (l.reps >= 5) {
+          const k = Math.round(toKg(l.weight, lineUnit(l, w)) * 100);
+          const g = d.sets.get(k) || { n: 0, v };
+          g.n += Math.max(1, l.sets || 1);
+          d.sets.set(k, g);
+        }
       }
       day.set(w.date, d);
-      const q = [...d.sets].filter(([, n]) => n >= 3).map(([v]) => v);
+      const q = [...d.sets.values()].filter((g) => g.n >= 3).map((g) => g.v);
       const d35 = q.length ? Math.max(...q) : null;
       if (d.one !== null && (best1 === null || d.one > best1.v)) {
         if (i > 0 && best1 !== null) add(w, { kind: '1rm', title: 'New 1-rep max', value: wtxt(d.one) });
         best1 = { v: d.one, date: w.date };
       }
       if (d35 !== null && (best35 === null || d35 > best35.v)) {
-        if (i > 0 && best35 !== null) add(w, { kind: '3x5', title: 'New 3×5 max', value: wtxt(d35) });
+        // The first 3×5 counts too, once the exercise has earlier entries.
+        if (i > 0) add(w, { kind: '3x5', title: best35 === null ? 'First 3×5' : 'New 3×5 max', value: wtxt(d35) });
         best35 = { v: d35, date: w.date };
       }
     });
     // Days that qualified as 3×5 (for chart markers).
-    const days35 = new Set([...day].filter(([, d]) => [...d.sets.values()].some((n) => n >= 3)).map(([k]) => k));
+    const days35 = new Set([...day].filter(([, d]) => [...d.sets.values()].some((g) => g.n >= 3)).map(([k]) => k));
+    sortRecords(records);
     return { records, list, summary: { type, oneRm: best1, threeByFive: best35, days35 } };
   }
 
@@ -276,6 +301,7 @@ export function computeRecords(state, exerciseId) {
     });
     const now = periodKeys(todayKey(), s.weekStart);
     const current = { week: totals.week.get(now.week) || 0, month: totals.month.get(now.month) || 0, year: totals.year.get(now.year) || 0 };
+    sortRecords(records);
     return { records, list, summary: { type, ...best, current } };
   }
 
@@ -291,6 +317,7 @@ export function computeRecords(state, exerciseId) {
       best[std.id] = { time: t, date: w.date, w };
     }
   });
+  sortRecords(records);
   return { records, list, summary: { type, distances: best } };
 }
 

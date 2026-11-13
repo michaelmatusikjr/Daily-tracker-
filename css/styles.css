@@ -1130,3 +1130,19 @@ input[type="date"].input, input[type="time"].input { min-width: 0; }
 .dist-table tr:last-child th, .dist-table tr:last-child td { border-bottom: none; }
 .dist-records .muted { margin-top: var(--s2); }
 .line-chart .mark { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+
+/* ---------- 1.4.1 ---------- */
+/* Workout type colours: fixed hues (independent of the accent) so the three are always distinct;
+   each ≥3:1 against the card background, with different lightness too (colour-blind safe). */
+:root { --t-strength: #4361ee; --t-body: #c97a0c; --t-cardio: #0b5e46; }
+:root[data-theme="dark"] { --t-strength: #7a8cff; --t-body: #ffc266; --t-cardio: #1d8f6c; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --t-strength: #7a8cff; --t-body: #ffc266; --t-cardio: #1d8f6c; } }
+.split-s, .lg-s { background: var(--t-strength); }
+.split-b, .lg-b { background: var(--t-body); }
+.split-c, .lg-c { background: var(--t-cardio); }
+/* Workout filters: type chips wrap; exercise chips scroll with an edge fade as the affordance. */
+.wo-filters { margin-bottom: var(--s2); }
+.filter-wrap { display: flex; flex-wrap: wrap; gap: var(--s2); padding: 2px 0 var(--s2); }
+.ex-filter-row { margin-bottom: 0; padding-right: 28px;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
