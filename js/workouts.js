@@ -225,7 +225,13 @@ function sortRecords(records) { for (const v of records.values()) v.sort((a, b) 
 export function recordToast(labels, name) {
   const [a, b] = labels;
   if (labels.length === 1) return `🏆 ${a.title}: ${name} ${a.value}`;
-  if (labels.length === 2 && a.value === b.value) return `🏆 ${a.title} & ${b.title.replace(/^New /, '')}: ${name} ${a.value}`;
+  if (labels.length === 2 && a.value === b.value) {
+    // Share the common leading words: "Most reps in a week & day", "New 3×5 max & 1-rep max".
+    const aw = a.title.split(' '), bw = b.title.split(' ');
+    let i = 0;
+    while (i < aw.length - 1 && i < bw.length - 1 && aw[i] === bw[i]) i++;
+    return `🏆 ${a.title} & ${bw.slice(i).join(' ').replace(/^New /, '')}: ${name} ${a.value}`;
+  }
   if (labels.length === 2) return `🏆 ${a.title}: ${name} ${a.value} · ${b.title.replace(/^New /, '')} ${b.value}`;
   return `🏆 ${a.title}: ${name} ${a.value} +${labels.length - 1} more`;
 }
