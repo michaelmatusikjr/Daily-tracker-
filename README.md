@@ -54,6 +54,13 @@ A calm, offline-first **daily planner + habit tracker** that runs entirely in yo
 
 **Stats**: overview cards, a 7/30-day completion bar chart (inline SVG), per-habit completion rates, and your best day of the week.
 
+**Item menus** (press and hold any item; right-click with a mouse; the ContextMenu key or Shift+F10 on a focused item): a bottom sheet on phones, a small popover next to the item on desktop. Destructive actions are last, in red, and every one has Undo. Moving your finger more than ~10px cancels the hold, so scrolling and swiping still work; holding a drag handle still drags. A one-time tip on Today points this out.
+- **Task:** Edit · Mark done/not done · Move to tomorrow · Move to… (date picker) · Duplicate · Delete. Repeating tasks get **Skip this day** instead of Move, and Delete asks “this day / whole series”.
+- **Habit** (Today and Habits): Edit · View details · Mark done/not done for that day · Archive/Unarchive · Delete (with confirm). Count habits also get Add one, Remove one and Reset today. (This replaces the old long-press-to-subtract gesture; the − button still removes one with a single tap.)
+- **Workout entry:** Edit · Log again today (prefilled) · View exercise · Delete.
+- **Exercise** (manage list and filter chips): Edit · View history · Archive · Delete (offers Archive instead when it has history).
+- **Calendar day:** Open day · Add task on this day · Log workout on this day (not for future days).
+
 **Settings** (profile menu › Settings, the side nav on wide screens, or `#settings`): theme (auto/light/dark), 6 accent colours, week start (Mon/Sun), 12h/24h time, workout units and the optional habit link, task categories, notifications, install button (or iOS instructions), JSON export/import with validation, reset this profile (asks twice), the welcome tour again, and the app version.
 
 **Quality**
@@ -85,6 +92,7 @@ js/onboarding.js        First-run tour (includes the profile name for new users)
 js/profiles.js          Avatar, profile menu/editor, photo resizing
 js/workouts.js          Workout logic: units, time parsing, summaries, records, charts, habit link
 js/workoutForm.js       Workout log form
+js/itemMenu.js          Long-press / right-click / keyboard item menus
 js/reminders.js         Reminder permission checks and help text
 js/views/*.js           Today, Habits, Habit detail, Workouts + exercise detail, Calendar, Stats, Settings
 icons/                  SVG + PNG icons (192, 512, maskable 512, apple-touch 180)

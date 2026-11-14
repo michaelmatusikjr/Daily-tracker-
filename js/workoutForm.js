@@ -47,14 +47,15 @@ function stepper({ label, value, step, decimal = false, id }) {
   return { el, input, get: () => parseNum(input.value) };
 }
 
-/** Open the log form. workout = existing entry to edit (or null). opts: { exerciseId, date } */
+/** Open the log form. workout = existing entry to edit (or null). opts: { exerciseId, date, template } (template = entry to copy values from) */
 export function openWorkoutForm(workout, opts = {}) {
   const st = getState();
   const settings = st.settings;
   const wu = settings.weightUnit, du = settings.distanceUnit;
   const isNew = !workout;
   const today = todayKey();
-  let exId = workout?.exerciseId || (opts.exerciseId && exerciseById(st, opts.exerciseId) ? opts.exerciseId : null);
+  const tpl = opts.template && exerciseById(st, opts.template.exerciseId) ? opts.template : null;
+  let exId = workout?.exerciseId || tpl?.exerciseId || (opts.exerciseId && exerciseById(st, opts.exerciseId) ? opts.exerciseId : null);
   let newEx = null; // { name, type } for an exercise created while logging
   let showNote = !!workout?.note;
 
@@ -132,11 +133,11 @@ export function openWorkoutForm(workout, opts = {}) {
   function loadValues() {
     lines = []; timeText = null; dist = null; flip = false;
     const st2 = getState();
-    const src = workout || (exId ? lastWorkout(st2, exId) : null);
+    const src = workout || (tpl && tpl.exerciseId === exId ? tpl : null) || (exId ? lastWorkout(st2, exId) : null);
     lastLine.textContent = '';
     if (!src) return;
     const ex = exerciseById(st2, exId);
-    if (!workout) lastLine.textContent = `Last time: ${workoutSummary(src, ex, st2.settings)} · ${fmtDateShort(src.date)}`;
+    if (!workout) lastLine.textContent = `${src === tpl ? 'Copied from' : 'Last time'}: ${workoutSummary(src, ex, st2.settings)} · ${fmtDateShort(src.date)}`;
     lines = src.lines.map((l) => lineFromSource(l, src));
     timeText = timeInputValue(src.time, ex?.type === 'cardio' ? 'cardio' : 'strength');
     if (src.distance !== null) {

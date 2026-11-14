@@ -3,7 +3,7 @@ import { update, getState, uid } from './store.js';
 import { ctx } from './ctx.js';
 import { toast, haptic, choose } from './ui.js';
 import { isRecurring, isTaskDone, habitTarget, habitVal, dayProgress } from './logic.js';
-import { todayKey } from './dates.js';
+import { todayKey, fmtDateShort, addDays } from './dates.js';
 import { syncHabitLink, computeRecords, exerciseById, workoutSummary, recordToast } from './workouts.js';
 
 function celebrateIfDone(k, before, undo = null) {
@@ -89,25 +89,7 @@ export async function deleteTask(id, k) {
       { value: null, label: 'Cancel', style: 'ghost' },
     ]);
     if (!choice) return false;
-    if (choice === 'one') {
-      const wasDone = !!t.doneDates[k];
-      update((s) => {
-        const x = s.tasks.find((y) => y.id === id);
-        if (!x.exceptions.includes(k)) x.exceptions.push(k);
-        x.updatedAt = Date.now();
-        delete x.doneDates[k];
-      });
-      toast('Removed from this day', {
-        action: 'Undo',
-        onAction: () => update((s) => {
-          const x = s.tasks.find((y) => y.id === id);
-          if (!x) return;
-          x.exceptions = x.exceptions.filter((d) => d !== k);
-          if (wasDone) x.doneDates[k] = true;
-        }),
-      });
-      return true;
-    }
+    if (choice === 'one') { skipTaskDay(id, k, 'Removed from this day'); return true; }
   }
   const snapshot = JSON.parse(JSON.stringify(t));
   const index = st.tasks.indexOf(t);
@@ -117,6 +99,50 @@ export async function deleteTask(id, k) {
     onAction: () => update((s) => { s.tasks.splice(Math.min(index, s.tasks.length), 0, snapshot); }),
   });
   return true;
+}
+
+/** Skip one occurrence of a repeating task (an exception), with Undo. */
+export function skipTaskDay(id, k, msg = `Skipped ${fmtDateShort(k)}`) {
+  const t = getState().tasks.find((x) => x.id === id);
+  if (!t) return;
+  const wasDone = !!t.doneDates?.[k];
+  update((s) => {
+    const x = s.tasks.find((y) => y.id === id);
+    if (!x.exceptions.includes(k)) x.exceptions.push(k);
+    x.updatedAt = Date.now();
+    delete x.doneDates[k];
+  });
+  toast(msg, {
+    action: 'Undo',
+    onAction: () => update((s) => {
+      const x = s.tasks.find((y) => y.id === id);
+      if (!x) return;
+      x.exceptions = x.exceptions.filter((d) => d !== k);
+      if (wasDone) x.doneDates[k] = true;
+    }),
+  });
+}
+
+/** Move a one-off task to another day, with Undo. */
+export function moveTask(id, date) {
+  const t = getState().tasks.find((x) => x.id === id);
+  if (!t || !date || t.date === date) return;
+  const prev = t.date;
+  update((s) => { const x = s.tasks.find((y) => y.id === id); if (x) { x.date = date; x.updatedAt = Date.now(); } });
+  const label = date === todayKey() ? 'today' : date === addDays(todayKey(), 1) ? 'tomorrow' : fmtDateShort(date);
+  toast(`Moved “${t.title}” to ${label}`, {
+    action: 'Undo',
+    onAction: () => update((s) => { const x = s.tasks.find((y) => y.id === id); if (x) x.date = prev; }),
+  });
+}
+
+/** Copy a task (not its completion), placed right after the original, with Undo. */
+export function duplicateTask(id) {
+  const t = getState().tasks.find((x) => x.id === id);
+  if (!t) return;
+  const copy = { ...JSON.parse(JSON.stringify(t)), id: uid(), done: false, doneDates: {}, createdAt: Date.now(), updatedAt: Date.now(), order: (t.order || 0) + 0.5 };
+  update((s) => { s.tasks.push(copy); });
+  toast(`Duplicated “${t.title}”`, { action: 'Undo', onAction: () => update((s) => { s.tasks = s.tasks.filter((x) => x.id !== copy.id); }) });
 }
 
 export function reorderTasks(ids) {
@@ -160,6 +186,17 @@ export function bumpHabit(id, k, delta) {
     if (delta < 0 && cur === 0) return;
     setHabitValue(id, k, cur + delta);
   }
+}
+
+/** Clear a habit's value for one day, with Undo. */
+export function resetHabitDay(id, k) {
+  const st = getState();
+  const hb = st.habits.find((x) => x.id === id);
+  if (!hb) return;
+  const prev = habitVal(st, hb, k);
+  if (!prev) return;
+  setHabitValue(id, k, 0);
+  toast(`Reset ${hb.name} for ${k === todayKey() ? 'today' : fmtDateShort(k)}`, { action: 'Undo', onAction: () => setHabitValue(id, k, prev, { silentUndo: true }) });
 }
 
 /** Toggle a day fully done / not done (used by the week dots and calendars). */
@@ -352,6 +389,16 @@ export function deleteWorkout(id) {
   const snap = workoutSnapshot(st);
   update((s) => { s.workouts = s.workouts.filter((x) => x.id !== id); syncHabitLink(s, w.date); });
   toast(`Deleted ${ex?.name || 'workout'}`, { action: 'Undo', onAction: () => restoreSnapshot(snap) });
+}
+
+/** Archive / unarchive an exercise, with Undo. */
+export function setExerciseArchived(id, archived) {
+  const ex = exerciseById(getState(), id);
+  if (!ex) return;
+  update((s) => { const e = s.exercises.find((x) => x.id === id); if (e) e.archived = archived; });
+  toast(`${ex.name} ${archived ? 'archived' : 'restored'}`, {
+    action: 'Undo', onAction: () => update((s) => { const e = s.exercises.find((x) => x.id === id); if (e) e.archived = !archived; }),
+  });
 }
 
 /** Delete an exercise and all of its workouts (Undo restores both). */

@@ -10,7 +10,8 @@ import {
   fmtClock, fmtLong, trimNum, weightLabel, distLabel, paceText, recordText, STD_DISTANCES,
 } from '../workouts.js';
 import { openWorkoutForm } from '../workoutForm.js';
-import { deleteWorkout, deleteExercise, resyncExerciseDates } from '../actions.js';
+import { deleteWorkout, deleteExercise, resyncExerciseDates, setExerciseArchived } from '../actions.js';
+import { attachMenu, workoutMenu, exerciseMenu } from '../itemMenu.js';
 
 export const TYPE_ICON = { strength: 'dumbbell', bodyweight: 'body', cardio: 'run' };
 export const TYPE_NAME = { strength: 'Strength', bodyweight: 'Bodyweight', cardio: 'Cardio' };
@@ -38,7 +39,7 @@ function entryRow(w, st, records, { showName = true } = {}) {
   const ex = exerciseById(st, w.exerciseId);
   const summary = workoutSummary(w, ex, st.settings);
   const pop = ctx.anim.has('w-' + w.id);
-  return h(`li.wo-entry${pop ? '.pop' : ''}`, { dataset: { id: w.id } },
+  const li = h(`li.wo-entry${pop ? '.pop' : ''}`, { dataset: { id: w.id } },
     h('button.wo-main', { type: 'button', onclick: () => openWorkoutForm(w), 'aria-label': `Edit ${ex?.name || 'workout'}: ${summary}` },
       h('span.wo-icon', { 'aria-hidden': 'true' }, typeIcon(ex)),
       h('span.wo-text',
@@ -46,6 +47,8 @@ function entryRow(w, st, records, { showName = true } = {}) {
         h('span.wo-summary', summary),
         w.note ? h('span.wo-note', w.note) : null)),
     iconBtn('trash', `Delete ${ex?.name || 'workout'} on ${fmtDateShort(w.date)}`, () => deleteWorkout(w.id), 'wo-del'));
+  attachMenu(li, () => workoutMenu(w.id), li.querySelector('.wo-main'));
+  return li;
 }
 
 function matchesFilter(w, f, st) {
@@ -83,7 +86,7 @@ export function renderWorkouts() {
   }, ic, label);
   root.append(h('div.wo-filters', { role: 'group', 'aria-label': 'Filter workouts' },
     h('div.filter-wrap', chip('all', 'All'), ...TYPE_OPTIONS.map((o) => chip(o.value, o.label, icon(o.icon, { size: 14 })))),
-    exChips.length ? h('div.filter-row.ex-filter-row.no-swipe', exChips.map((e) => chip('ex:' + e.id, e.name))) : null));
+    exChips.length ? h('div.filter-row.ex-filter-row.no-swipe', exChips.map((e) => { const c = chip('ex:' + e.id, e.name); attachMenu(c, () => exerciseMenu(e.id), c); return c; })) : null));
 
   if (f.startsWith('ex:')) {
     const ex = exerciseById(st, f.slice(3));
@@ -246,24 +249,45 @@ function looksBodyweight(st, e) {
 }
 
 // ---------------- Exercise management ----------------
+const withExMenu = (e, li) => { attachMenu(li, () => exerciseMenu(e.id), li.querySelector('button')); return li; };
 export function openExerciseManager() {
   const st = getState();
   const counts = new Map();
   st.workouts.forEach((w) => counts.set(w.exerciseId, (counts.get(w.exerciseId) || 0) + 1));
   const sorted = [...st.exercises].sort((a, b) => a.archived - b.archived || a.name.localeCompare(b.name));
   const list = sorted.length
-    ? h('ul.ex-manage', sorted.map((e) => h(`li${e.archived ? '.archived' : ''}`,
+    ? h('ul.ex-manage', sorted.map((e) => withExMenu(e, h(`li${e.archived ? '.archived' : ''}`,
       h('button.ex-manage-row', { type: 'button', onclick: () => { sheet.close(); openExerciseEditor(e); }, 'aria-label': `Edit ${e.name}` },
         typeIcon(e),
         h('span.ex-manage-text', h('b', e.name), h('small', `${TYPE_NAME[e.type] || 'Strength'} · ${counts.get(e.id) || 0} logged${e.archived ? ' · Archived' : ''}`),
           looksBodyweight(st, e) ? h('small.ex-hint', 'Has time-only or no-weight entries – Bodyweight may fit better.') : null),
-        icon('chevronRight', { size: 18 })))))
+        icon('chevronRight', { size: 18 }))))))
     : h('p.hint-line', 'No exercises yet. They’re created when you log a workout, or add one here.');
   const sheet = openSheet({
     title: 'Exercises',
     content: [list],
     footer: [h('span'), h('button.btn.primary', { type: 'button', onclick: () => { sheet.close(); openExerciseEditor(null); } }, icon('plus', { size: 18 }), 'New exercise')],
   });
+}
+
+/** Delete an exercise, offering "Archive instead" when it has history. onDone runs before deleting/archiving. */
+export async function confirmDeleteExercise(ex, onDone = () => {}) {
+  const count = getState().workouts.filter((w) => w.exerciseId === ex.id).length;
+  const leave = () => { if (location.hash === '#exercise/' + encodeURIComponent(ex.id)) ctx.go('workouts'); };
+  if (count) {
+    const c = await choose(`Delete ${ex.name}?`, `${count} logged workout${count === 1 ? '' : 's'} would be deleted too. Archive it instead to hide it but keep the history.`, [
+      { value: 'archive', label: 'Archive instead', style: 'primary' },
+      { value: 'delete', label: `Delete with ${count} workout${count === 1 ? '' : 's'}`, style: 'danger' },
+      { value: null, label: 'Cancel', style: 'ghost' },
+    ]);
+    if (c === 'archive') { onDone(); setExerciseArchived(ex.id, true); }
+    if (c === 'delete') { onDone(); deleteExercise(ex.id); leave(); }
+    return;
+  }
+  if (!(await confirmDialog(`Delete ${ex.name}?`, 'It has no logged workouts.', { ok: 'Delete', danger: true }))) return;
+  onDone();
+  deleteExercise(ex.id);
+  leave();
 }
 
 export function openExerciseEditor(ex) {
@@ -273,7 +297,6 @@ export function openExerciseEditor(ex) {
   const name = h('input.input', { type: 'text', maxlength: 60, value: ex?.name || '', autofocus: true, 'aria-label': 'Exercise name' });
   const err = h('p.form-error', { role: 'alert' });
   const arch = h('button.switch', { type: 'button', role: 'switch', 'aria-checked': String(archived), 'aria-label': 'Archived', onclick: () => { archived = !archived; arch.setAttribute('aria-checked', String(archived)); } }, h('span.knob'));
-  const count = ex ? getState().workouts.filter((w) => w.exerciseId === ex.id).length : 0;
   const save = () => {
     const n = name.value.trim().replace(/\s+/g, ' ');
     if (!n) { err.textContent = 'Please enter a name.'; name.focus(); return; }
@@ -289,22 +312,7 @@ export function openExerciseEditor(ex) {
     sheet.close();
     toast(isNew ? `Added ${n}` : `Saved ${n}`);
   };
-  const remove = async () => {
-    if (count) {
-      const c = await choose(`Delete ${ex.name}?`, `${count} logged workout${count === 1 ? '' : 's'} would be deleted too. Archive it instead to hide it but keep the history.`, [
-        { value: 'archive', label: 'Archive instead', style: 'primary' },
-        { value: 'delete', label: `Delete with ${count} workout${count === 1 ? '' : 's'}`, style: 'danger' },
-        { value: null, label: 'Cancel', style: 'ghost' },
-      ]);
-      if (c === 'archive') { update((s2) => { s2.exercises.find((e) => e.id === ex.id).archived = true; }); sheet.close(); toast(`${ex.name} archived`); }
-      if (c === 'delete') { sheet.close(); deleteExercise(ex.id); if (location.hash.startsWith('#exercise/')) ctx.go('workouts'); }
-      return;
-    }
-    if (!(await confirmDialog(`Delete ${ex.name}?`, 'It has no logged workouts.', { ok: 'Delete', danger: true }))) return;
-    sheet.close();
-    deleteExercise(ex.id);
-    if (location.hash.startsWith('#exercise/')) ctx.go('workouts');
-  };
+  const remove = () => confirmDeleteExercise(ex, () => sheet.close());
   const content = h('form.form', { onsubmit: (e) => { e.preventDefault(); save(); }, novalidate: true },
     h('div.field', h('label.field-label', 'Name'), name, !isNew ? h('p.field-hint', 'Renaming keeps all history.') : null),
     h('div.field', { role: 'group', 'aria-label': 'Type' }, h('span.field-label', 'Type'),

@@ -1,5 +1,6 @@
 // Small components shared by several views.
-import { h, ring, onPress } from '../ui.js';
+import { h, ring } from '../ui.js';
+import { attachMenu, taskMenu } from '../itemMenu.js';
 import { icon } from '../icons.js';
 import { getState } from '../store.js';
 import { ctx } from '../ctx.js';
@@ -15,7 +16,7 @@ export function reminderWarnBadge() {
   return h('span.meta.warn-badge', { title: `Reminder won’t appear: ${why}` }, icon('bellOff', { size: 13 }), h('span.sr-only', `Reminder won’t appear: ${why}`));
 }
 
-/** One-tap habit control: check button, or count button (tap +1, long-press/right-click −1). */
+/** One-tap habit control: check button, or count button (tap +1; Down/− key −1; long-press opens the item menu). */
 export function habitControl(hb, k, { big = false } = {}) {
   const st = getState();
   const v = habitVal(st, hb, k);
@@ -36,7 +37,8 @@ export function habitControl(hb, k, { big = false } = {}) {
   const btn = h(`button.habit-count${done ? '.done' : ''}${anim ? '.pop' : ''}${big ? '.big' : ''}`, {
     type: 'button', style, 'data-fk': 'hc-' + hb.id, disabled: future,
     title: future ? 'You can log this on the day' : null,
-    'aria-label': future ? `${hb.name}: upcoming, target ${target}` : `${hb.name}: ${v} of ${target}${hb.goal.unit ? ' ' + hb.goal.unit : ''}. Tap or press Up to add one; long-press, Down or minus to remove one.`,
+    'aria-label': future ? `${hb.name}: upcoming, target ${target}` : `${hb.name}: ${v} of ${target}${hb.goal.unit ? ' ' + hb.goal.unit : ''}. Tap or press Up to add one; Down or minus to remove one.`,
+    onclick: () => bumpHabit(hb.id, k, 1),
     onkeydown: (e) => {
       if (['ArrowDown', '-', 'Subtract'].includes(e.key)) { e.preventDefault(); bumpHabit(hb.id, k, -1); }
       else if (['ArrowUp', '+', '=', 'Add'].includes(e.key)) { e.preventDefault(); bumpHabit(hb.id, k, 1); }
@@ -44,7 +46,6 @@ export function habitControl(hb, k, { big = false } = {}) {
   },
   ring(v / target, { size, stroke: big ? 7 : 4, color: hb.color }),
   h('span.count-label', done ? icon('check', { size: big ? 26 : 18 }) : h('span', h('b', String(v)), h('small', `/${target}`))));
-  onPress(btn, { tap: () => bumpHabit(hb.id, k, 1), long: () => bumpHabit(hb.id, k, -1) });
   return btn;
 }
 
@@ -118,6 +119,7 @@ export function taskRow(t, k, { draggable = false, showDate = false, nowMin = nu
     meta.length ? h('span.task-meta', meta) : null),
   t.priority ? h('span.prio-flag', { title: PRIORITIES[t.priority].label + ' priority' }, icon('flag', { size: 14 }), h('span.sr-only', PRIORITIES[t.priority].label + ' priority')) : null,
   draggable ? h('button.drag-handle', { type: 'button', 'data-fk': 'dh-' + t.id, 'aria-label': `Reorder “${t.title}” (use arrow keys)` }, icon('grip', { size: 18 })) : null);
+  attachMenu(row, () => taskMenu(t.id, k), row.querySelector('.task-main'));
   return row;
 }
 

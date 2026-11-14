@@ -5,7 +5,8 @@ import { ctx } from '../ctx.js';
 import { streaks, completionRate, totalCompletions, scheduleLabel, habitVal, habitTarget, isScheduled, habitStart } from '../logic.js';
 import { todayKey, addDays, startOfWeek, fromKey, fmtDateShort, fmtMonthYear, monthStart, addMonths, daysInMonth, weekdayLabels, fmt, fmtTime } from '../dates.js';
 import { habitControl } from './widgets.js';
-import { setArchived, deleteHabit, toggleHabitDay } from '../actions.js';
+import { attachMenu, habitMenu } from '../itemMenu.js';
+import { setArchived, deleteHabit, toggleHabitDay, bumpHabit } from '../actions.js';
 import { openHabitForm } from '../forms.js';
 
 const pct = (r) => (r === null ? '—' : Math.round(r * 100) + '%');
@@ -33,12 +34,15 @@ export function renderHabitDetail(id) {
 
   // Hero: today's control
   const status = v >= target ? 'Done for today' : hb.goal.type === 'count' ? `${v} of ${target}${hb.goal.unit ? ' ' + hb.goal.unit : ''} today` : 'Not done yet today';
-  root.append(h('section.card.detail-hero', { style: { '--c': hb.color } },
+  const hero = h('section.card.detail-hero', { style: { '--c': hb.color } },
     habitControl(hb, today, { big: true }),
     h('div',
       h('p.progress-big', status),
-      h('p.progress-sub', hb.goal.type === 'count' ? 'Tap to add one · long-press to remove one' : 'Tap to toggle today'),
-      hb.reminder ? h('p.progress-break', h('span', icon('bell', { size: 13 }), 'Reminder at ' + fmtTime(hb.reminder, st.settings.timeFormat))) : null)));
+      h('p.progress-sub', hb.goal.type === 'count' ? 'Tap to add one · hold for more options' : 'Tap to toggle today'),
+      hb.reminder ? h('p.progress-break', h('span', icon('bell', { size: 13 }), 'Reminder at ' + fmtTime(hb.reminder, st.settings.timeFormat))) : null),
+    hb.goal.type === 'count' && v > 0 && !hb.archived ? iconBtn('minus', `Remove one from ${hb.name}`, () => bumpHabit(hb.id, today, -1), 'minus-btn') : null);
+  attachMenu(hero, () => habitMenu(hb.id, today), hero.querySelector('button'));
+  root.append(hero);
 
   const unit = s.unit === 'week' ? 'weeks' : 'days';
   root.append(h('section.stat-grid',

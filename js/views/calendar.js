@@ -1,6 +1,7 @@
 import { h, iconBtn, onSwipe } from '../ui.js';
 import { getState } from '../store.js';
 import { hasWorkoutOn } from '../workouts.js';
+import { attachMenu, dayMenu } from '../itemMenu.js';
 import { ctx } from '../ctx.js';
 import { dayProgress, tasksOn, isTaskDone, moodEmoji, PRIORITIES } from '../logic.js';
 import { todayKey, addDays, addMonths, startOfWeek, monthStart, daysInMonth, fmtMonthYear, fmtDateLong, weekdayLabels } from '../dates.js';
@@ -42,14 +43,17 @@ export function renderCalendar() {
       return h(`span.cal-dot${isTaskDone(t, k) ? '.done' : ''}`, { style: { background: cat ? cat.color : t.priority ? PRIORITIES[t.priority].color : 'var(--accent)' } });
     });
     const label = `${fmtDateLong(k)}. ${tasks.length} task${tasks.length === 1 ? '' : 's'}${p.habits.total ? `, ${p.habits.done} of ${p.habits.total} habits done` : ''}${mood ? ', mood ' + ['awful', 'bad', 'okay', 'good', 'great'][mood - 1] : ''}${worked ? ', workout logged' : ''}`;
-    grid.append(h(`button.cal-day${inMonth ? '' : '.outside'}${k === today ? '.today' : ''}${k === ctx.ui.date ? '.selected' : ''}${p.total && p.pct === 1 && k <= today ? '.perfect' : ''}`, {
+    const cell = h(`button.cal-day${inMonth ? '' : '.outside'}${k === today ? '.today' : ''}${k === ctx.ui.date ? '.selected' : ''}${p.total && p.pct === 1 && k <= today ? '.perfect' : ''}`, {
       type: 'button', 'aria-label': label, style: { '--i': intensity.toFixed(2) },
       onclick: () => { ctx.setDate(k); ctx.go('today'); },
     },
     h('span.cal-num', String(Number(k.slice(8)))),
     mood ? h('span.cal-mood', { 'aria-hidden': 'true' }, moodEmoji(mood)) : null,
     worked ? h('span.cal-workout', { 'aria-hidden': 'true' }, '💪') : null,
-    tasks.length ? h('span.cal-dots', { 'aria-hidden': 'true' }, dots, tasks.length > 3 ? h('span.cal-more', '+') : null) : null));
+    tasks.length ? h('span.cal-dots', { 'aria-hidden': 'true' }, dots, tasks.length > 3 ? h('span.cal-more', '+') : null) : null);
+    const day = k;
+    attachMenu(cell, () => dayMenu(day), cell);
+    grid.append(cell);
   }
   const card = h('section.card.cal-card.no-swipe', grid);
   onSwipe(card, { left: () => setM(1), right: () => setM(-1) });
@@ -65,6 +69,6 @@ export function renderCalendar() {
     h('div.stat-card', h('span.stat-value', String(monthDone)), h('span.stat-label', 'Items completed')),
     h('div.stat-card', h('span.stat-value', monthTasks ? Math.round((monthDone / monthTasks) * 100) + '%' : '—'), h('span.stat-label', 'Completion')),
     h('div.stat-card', h('span.stat-value', String(moodDays)), h('span.stat-label', 'Days journaled'))));
-  root.append(h('p.hint-line', 'Tap a day to open its agenda. Swipe to change months.'));
+  root.append(h('p.hint-line', 'Tap a day to open its agenda; press and hold for more. Swipe to change months.'));
   return root;
 }

@@ -123,7 +123,11 @@ export function toast(message, { action, onAction, duration = 4500, force = fals
 // ---------- Bottom sheets / dialogs ----------
 const openSheets = [];
 
-export function openSheet({ title, content, footer = null, onClose, cls = '' }) {
+/**
+ * Bottom sheet (centered dialog on wide screens). `at` = { x, y, top } turns it into a small
+ * popover anchored at that point (used by item menus opened with a mouse or keyboard).
+ */
+export function openSheet({ title, content, footer = null, onClose, cls = '', at = null }) {
   const prevFocus = document.activeElement;
   const titleId = 'sheet-t-' + Math.random().toString(36).slice(2, 7);
   const closeBtn = iconBtn('x', 'Close', () => close());
@@ -135,8 +139,17 @@ export function openSheet({ title, content, footer = null, onClose, cls = '' }) 
   const openedAt = Date.now();
   // Ignore backdrop clicks right after opening (e.g. a double-tap on the button that opened it).
   const backdrop = h('div.sheet-backdrop', { onclick: () => { if (Date.now() - openedAt > 350) close(); } });
-  const root = h('div.sheet-root', backdrop, panel);
+  const root = h(`div.sheet-root${at ? '.pop' : ''}`, backdrop, panel);
   document.body.append(root);
+  if (at) {
+    // Below the anchor point when it fits, otherwise above it; always inside the viewport.
+    const r = { width: panel.offsetWidth, height: panel.offsetHeight }; // untransformed size
+    const vw = document.documentElement.clientWidth, vh = window.innerHeight;
+    const left = Math.max(8, Math.min(at.x, vw - r.width - 8));
+    let top = at.y;
+    if (top + r.height > vh - 8) top = Math.max(8, (at.top ?? at.y) - r.height);
+    Object.assign(panel.style, { left: left + 'px', top: top + 'px' });
+  }
   document.body.classList.add('sheet-open');
   let closed = false;
 
@@ -222,29 +235,58 @@ export async function confirmDialog(title, message, { ok = 'Confirm', danger = f
 }
 
 // ---------- Gestures ----------
-/** Tap vs long-press (and right-click) on one element. */
-export function onPress(el, { tap, long, delay = 480 }) {
-  let timer = null, longFired = false, sx = 0, sy = 0;
+/**
+ * Open an item's action menu: long-press on touch (~500 ms, cancelled by moving > 10 px),
+ * right-click with a mouse, or the ContextMenu key / Shift+F10 on keyboard focus.
+ * open(mode, info) gets mode 'touch' | 'mouse' | 'key' and the pointer position.
+ * Long-presses that start on a drag handle or a form field are left alone, and the tap
+ * that ends a long-press is swallowed so it doesn't also run the item's normal action.
+ */
+export function onItemMenu(el, open, { delay = 500 } = {}) {
+  const skip = '.drag-handle, input, textarea, select';
+  let timer = null, sx = 0, sy = 0, suppress = false, lastOpen = 0, lastMode = null, lastType = 'mouse', lastDown = 0;
+  const fire = (mode, info) => { lastOpen = Date.now(); lastMode = mode; open(mode, info); };
+  const cancel = () => { clearTimeout(timer); timer = null; };
   el.addEventListener('pointerdown', (e) => {
-    if (e.button && e.button !== 0) return;
-    longFired = false; sx = e.clientX; sy = e.clientY;
-    clearTimeout(timer);
-    timer = setTimeout(() => { longFired = true; haptic(25); long?.(); }, delay);
+    suppress = false; lastType = e.pointerType || 'mouse'; lastDown = Date.now();
+    if (lastType === 'mouse' || !e.isPrimary || e.target.closest(skip)) return;
+    sx = e.clientX; sy = e.clientY;
+    const target = e.target;
+    cancel();
+    timer = setTimeout(() => {
+      timer = null; suppress = true; haptic(10); swallowNextClick();
+      fire('touch', { target, x: sx, y: sy });
+    }, delay);
   });
-  const cancel = () => clearTimeout(timer);
+  el.addEventListener('pointermove', (e) => { if (timer && Math.hypot(e.clientX - sx, e.clientY - sy) > 10) cancel(); });
   el.addEventListener('pointerup', cancel);
-  el.addEventListener('pointerleave', cancel);
   el.addEventListener('pointercancel', cancel);
-  el.addEventListener('pointermove', (e) => { if (Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) > 12) cancel(); });
   el.addEventListener('contextmenu', (e) => {
+    if (e.target.closest('input, textarea, select')) return;
     e.preventDefault();
-    clearTimeout(timer);
-    if (!longFired) { longFired = true; long?.(); }
+    if (e.target.closest('.drag-handle')) return;
+    const touch = lastType !== 'mouse' && Date.now() - lastDown < 1500;
+    // A touch long-press or the ContextMenu key can raise contextmenu too: open only once.
+    const fromKey = !e.clientX && !e.clientY;
+    if (Date.now() - lastOpen < 800 && (touch || (lastMode === 'key' && fromKey))) return;
+    if (touch) { cancel(); suppress = true; swallowNextClick(); }
+    fire(touch ? 'touch' : fromKey ? 'key' : 'mouse', { target: e.target, x: e.clientX, y: e.clientY });
   });
-  el.addEventListener('click', (e) => {
-    if (longFired) { e.preventDefault(); longFired = false; return; }
-    tap?.(e);
+  el.addEventListener('keydown', (e) => {
+    if (e.key !== 'ContextMenu' && !(e.shiftKey && e.key === 'F10')) return;
+    e.preventDefault(); e.stopPropagation();
+    fire('key', { target: e.target });
   });
+  // Swallow the click that follows a long-press: it may land on the item or on the menu that
+  // just opened under the finger (capture phase, before any handler runs).
+  el.addEventListener('click', (e) => { if (suppress) { suppress = false; e.preventDefault(); e.stopPropagation(); } }, true);
+  // After a long-press, cancel the finger-up touchend: that also cancels the click and the emulated
+  // mouse events, so nothing under the finger (the item or the menu that just opened) gets activated.
+  const swallowNextClick = () => {
+    const end = (e) => { e.preventDefault(); document.removeEventListener('touchend', end, true); };
+    document.addEventListener('touchend', end, { capture: true, passive: false });
+    setTimeout(() => { document.removeEventListener('touchend', end, true); suppress = false; }, 3000);
+  };
 }
 
 /** Horizontal swipe detection (touch). */

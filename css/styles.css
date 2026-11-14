@@ -1146,3 +1146,35 @@ input[type="date"].input, input[type="time"].input { min-width: 0; }
 .ex-filter-row { margin-bottom: 0; padding-right: 28px;
   -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
   mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+
+/* ---------- 1.5.0: item action menus ---------- */
+/* Items with a press-and-hold menu: no native callout or text selection on the row itself. */
+.has-menu { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.menu-list { display: flex; flex-direction: column; gap: 2px; margin: 0 calc(-1 * var(--s2)); }
+.menu-item {
+  display: flex; align-items: center; gap: var(--s3); width: 100%; min-height: 50px; padding: 0 var(--s3);
+  border: 0; border-radius: 12px; background: transparent; color: var(--text); font: inherit; font-size: 16px; font-weight: 560; text-align: left; cursor: pointer;
+}
+.menu-item svg { color: var(--text-2); flex: none; }
+.menu-item:hover, .menu-item:focus-visible { background: var(--surface-2); }
+.menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.menu-item.danger, .menu-item.danger svg { color: var(--danger); }
+.menu-item.danger { margin-top: var(--s1); border-top: 1px solid var(--border); border-radius: 0 0 12px 12px; }
+.sheet.action-menu .sheet-title { font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sheet.action-menu .sheet-body { padding-bottom: var(--s4); }
+@media (min-width: 700px) { .sheet.action-menu { max-width: 380px; } }
+/* Popover variant (mouse / keyboard on wide screens), anchored to the item. */
+.sheet-root.pop { display: block; padding: 0; }
+.sheet-root.pop .sheet-backdrop { background: transparent; }
+.sheet-root.pop .sheet {
+  position: fixed; width: 260px; max-width: calc(100vw - 16px); max-height: min(420px, calc(100dvh - 16px));
+  border-radius: 14px; padding-bottom: 0; border: 1px solid var(--border);
+  opacity: 0; transform: scale(.97); transform-origin: top left; transition: opacity .12s, transform .12s var(--ease);
+}
+.sheet-root.pop.open .sheet { opacity: 1; transform: none; }
+.sheet-root.pop .sheet-grabber { display: none; }
+.sheet-root.pop .sheet-head { padding: 8px 4px 0 14px; }
+.sheet-root.pop .sheet-title { font-size: 14px; color: var(--text-2); font-weight: 650; }
+.sheet-root.pop .sheet-body { padding: 4px 12px 8px; }
+.sheet-root.pop .menu-item { min-height: 40px; font-size: 15px; }
+.detail-hero .minus-btn { margin-left: auto; }

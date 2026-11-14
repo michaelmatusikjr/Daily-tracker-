@@ -433,7 +433,7 @@ export function openHabitForm(habit) {
     groupField('Icon', h('div', emojiGrid, h('div.recur-extra.inline', h('span', 'Or type your own'), custom))),
     groupField('Color', colors),
     groupField('Schedule', h('div', sched, daysRow, timesRow)),
-    groupField('Goal', h('div', goal, countRow), 'Count goals: tap to add one, long-press (or right-click) to remove one.'),
+    groupField('Goal', h('div', goal, countRow), 'Count goals: tap to add one, tap − to remove one.'),
     groupField('Time of day', tod),
     field('Reminder', reminder, 'Optional. Reminders fire while the app is open or was recently used.'),
     habitNotice.el,

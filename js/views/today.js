@@ -1,4 +1,4 @@
-import { h, iconBtn, ring, onSwipe, makeSortable, emptyState, sectionHead } from '../ui.js';
+import { h, iconBtn, ring, onSwipe, makeSortable, emptyState, sectionHead, toast, isSheetOpen } from '../ui.js';
 import { icon } from '../icons.js';
 import { getState, getActiveProfile } from '../store.js';
 import { avatarEl, openProfileMenu } from '../profiles.js';
@@ -9,6 +9,7 @@ import { taskRow, habitControl, streakBadge, timeRange, reminderWarnBadge } from
 import { canFire } from '../reminders.js';
 import { moveToToday, reorderTasks, setMood, setNote, bumpHabit } from '../actions.js';
 import { openQuickAdd } from '../forms.js';
+import { attachMenu, habitMenu } from '../itemMenu.js';
 
 const TOD_ORDER = { morning: 0, afternoon: 1, evening: 2, anytime: 3 };
 const TOD_LABEL = { morning: 'Morning', afternoon: 'Afternoon', evening: 'Evening', anytime: '' };
@@ -34,6 +35,19 @@ function settingsTip() {
   return h('div.coach-tip', { role: 'note' },
     h('span', '⚙️ ', h('b', 'Settings moved here.'), ' Tap your picture for settings and profiles.'),
     h('button.link-btn', { type: 'button', onclick: () => markTipSeen() }, 'Got it'));
+}
+
+const attachLi = (li, build) => { attachMenu(li, build, li.querySelector('button')); return li; };
+
+/** One-time hint about item menus, the first time Today shows items. */
+function menuHint(hasItems) {
+  if (!hasItems || tipsSeen().itemMenu || !getState().settings.onboarded) return;
+  setTimeout(() => {
+    // Never replace a toast that is showing (it may carry an Undo); try again on a later render.
+    if (document.querySelector('#toasts .toast') || isSheetOpen() || tipsSeen().itemMenu) return;
+    try { localStorage.setItem(TIPS_KEY, JSON.stringify({ ...tipsSeen(), itemMenu: true })); } catch { return; }
+    toast('Tip: press and hold any item for more options.', { duration: 6000, force: true });
+  }, 600);
 }
 
 export function renderToday() {
@@ -134,12 +148,12 @@ export function renderToday() {
       if (hb.schedule.type === 'perWeek') sub.push(`${weekCount(st, hb, k)}/${hb.schedule.times} this week`);
       if (hb.goal.type === 'count') sub.push(`${v}/${habitTarget(hb)}${hb.goal.unit ? ' ' + hb.goal.unit : ''}`);
       if (TOD_LABEL[hb.timeOfDay]) sub.push(TOD_LABEL[hb.timeOfDay]);
-      list.append(h('li.habit-row', { style: { '--c': hb.color } },
+      list.append(attachLi(h('li.habit-row', { style: { '--c': hb.color } },
         h('button.habit-row-main', { type: 'button', onclick: () => ctx.go('habit/' + hb.id), 'aria-label': `${hb.name} details` },
           h('span.emoji-bubble', { 'aria-hidden': 'true' }, hb.emoji),
           h('span.habit-row-text', h('span.habit-name', hb.name), sub.length || s.current || (hb.reminder && !canFire()) ? h('span.habit-sub', streakBadge(s), hb.reminder && !canFire() ? reminderWarnBadge() : null, h('span.sub-text', sub.join(' · '))) : null)),
         hb.goal.type === 'count' && v > 0 && k <= today ? iconBtn('minus', `Remove one from ${hb.name}`, () => bumpHabit(hb.id, k, -1), 'minus-btn') : null,
-        habitControl(hb, k)));
+        habitControl(hb, k)), () => habitMenu(hb.id, k)));
     }
     root.append(h('section.section', sectionHead('Habits', h('a.link-btn', { href: '#habits' }, 'All habits'), 'habits'), list));
   }
@@ -174,6 +188,8 @@ export function renderToday() {
     const doneCount = anytime.filter((t) => list.querySelector(`[data-id="${CSS.escape(t.id)}"].done`)).length;
     root.append(h('section.section', sectionHead('Anytime', h('span.muted.small', `${doneCount}/${anytime.length}`), 'list'), list));
   }
+
+  menuHint(habits.length + timed.length + anytime.length > 0);
 
   // ---- Journal ----
   root.append(journalCard(k));

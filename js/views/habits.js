@@ -8,8 +8,11 @@ import { habitControl, weekDots, streakBadge, reminderWarnBadge } from './widget
 import { canFire } from '../reminders.js';
 import { reorderHabits, setArchived, seedExamples, bumpHabit } from '../actions.js';
 import { openHabitForm } from '../forms.js';
+import { attachMenu, habitMenu } from '../itemMenu.js';
 
 const GROUPS = [['morning', 'Morning', '🌅'], ['afternoon', 'Afternoon', '☀️'], ['evening', 'Evening', '🌙'], ['anytime', 'Anytime', '✨']];
+
+const withMenu = (hb, li) => { attachMenu(li, () => habitMenu(hb.id), li.querySelector('.habit-open')); return li; };
 
 export function renderHabits() {
   const st = getState();
@@ -55,6 +58,7 @@ export function renderHabits() {
             hb.goal.type === 'count' && v > 0 ? iconBtn('minus', `Remove one from ${hb.name}`, () => bumpHabit(hb.id, today, -1), 'minus-btn') : null,
             habitControl(hb, today))));
     if (!reorder) {
+      attachMenu(li, () => habitMenu(hb.id, today), li.querySelector('.habit-open'));
       li.append(h('div.habit-card-bottom',
         weekDots(hb, today),
         h('div.streaks',
@@ -88,10 +92,10 @@ export function renderHabits() {
       h('button.collapse-btn', { type: 'button', 'aria-expanded': String(open), onclick: () => { ctx.ui.showArchived = !open; ctx.rerender(); } },
         icon('archive', { size: 16 }), `Archived (${archived.length})`, h('span.chev', icon('chevronDown', { size: 16 }))));
     if (open) {
-      sec.append(h('ul.archived-list', archived.map((hb) => h('li.archived-item',
+      sec.append(h('ul.archived-list', archived.map((hb) => withMenu(hb, h('li.archived-item',
         h('button.habit-open', { type: 'button', onclick: () => ctx.go('habit/' + hb.id) },
           h('span.emoji-bubble.small', { style: { '--c': hb.color }, 'aria-hidden': 'true' }, hb.emoji), h('span.habit-name', hb.name)),
-        h('button.btn.small.secondary', { type: 'button', onclick: () => setArchived(hb.id, false) }, 'Restore')))));
+        h('button.btn.small.secondary', { type: 'button', onclick: () => setArchived(hb.id, false) }, 'Restore'))))));
     }
     root.append(sec);
   }
