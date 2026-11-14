@@ -1,6 +1,6 @@
 // Daily Tracker service worker: cache-first app shell, versioned cache.
 // Bump VERSION whenever any app file changes so clients get the update.
-const VERSION = '1.5.1';
+const VERSION = '1.6.0';
 const CACHE = `daily-tracker-${VERSION}`;
 const SHELL = [
   './',
@@ -33,6 +33,8 @@ const SHELL = [
   './js/views/workouts.js',
   './js/workoutForm.js',
   './js/itemMenu.js',
+  './js/push.js',
+  './js/pushConfig.js',
   './js/workouts.js',
   './icons/icon.svg',
   './icons/icon-192.png',
@@ -95,11 +97,35 @@ self.addEventListener('fetch', (event) => {
   })());
 });
 
-self.addEventListener('notificationclick', (event) => {
+// ---------- Notifications ----------
+/** Only URLs inside this app (relative to the SW scope) are ever opened. */
+function appUrl(url) {
+  try {
+    const u = new URL(url || './', self.registration.scope);
+    return u.origin === self.location.origin && u.href.startsWith(self.registration.scope) ? u.href : self.registration.scope;
+  } catch { return self.registration.scope; }
+}
+
+/** A reminder sent by the push server (see server/): { title, body, url, tag }. */
+function onPush(event) {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch { d = { body: event.data ? event.data.text() : '' }; }
+  const opts = { body: String(d.body || ''), data: { url: appUrl(d.url) }, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png' };
+  if (d.tag) opts.tag = String(d.tag); // same tag as an in-app reminder for the same occurrence: no duplicates
+  return self.registration.showNotification(String(d.title || 'Daily Tracker'), opts);
+}
+self.addEventListener('push', (event) => { event.waitUntil(onPush(event)); });
+
+/** Focus an open window (and show the reminder's day there), or open the app at its URL. */
+async function onNotificationClick(event) {
   event.notification.close();
-  event.waitUntil((async () => {
-    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    for (const c of all) if ('focus' in c) return c.focus();
-    return self.clients.openWindow('./');
-  })());
-});
+  const url = appUrl(event.notification.data && event.notification.data.url);
+  const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  const client = all.find((c) => c.url.startsWith(self.registration.scope)) || all[0];
+  if (client && 'focus' in client) {
+    client.postMessage({ type: 'OPEN_URL', url });
+    return client.focus();
+  }
+  return self.clients.openWindow(url);
+}
+self.addEventListener('notificationclick', (event) => { event.waitUntil(onNotificationClick(event)); });

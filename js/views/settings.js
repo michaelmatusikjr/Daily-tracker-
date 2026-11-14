@@ -11,6 +11,7 @@ import { showOnboarding } from '../onboarding.js';
 import { ensureCategory } from '../forms.js';
 import { reminderStatus, reminderProblem, activeReminders, blockedHelp } from '../reminders.js';
 import { setWorkoutHabit } from '../actions.js';
+import { pushConfigured, pushConfig, setPushConfig, pushEnabled, pushStatus, enablePush, disablePush, hideTextOn, setHideText, afterDataRemoved, WINDOW_DAYS } from '../push.js';
 
 const setSetting = (key, value, silent = false) => update((s) => { s.settings[key] = value; }, { silent });
 
@@ -132,7 +133,8 @@ export function renderSettings() {
     })),
     notifOn ? h('div.set-actions', h('button.btn.secondary.small', {
       type: 'button', onclick: async () => { const ok = await showNotification('Daily Tracker', 'Notifications are working 👍', 'test'); if (!ok) toast('Could not show a notification'); },
-    }, icon('bell', { size: 16 }), 'Send test')) : null));
+    }, icon('bell', { size: 16 }), 'Send test')) : null,
+    ...pushRows()));
 
   // Install
   let installCtl;
@@ -166,6 +168,58 @@ export function renderSettings() {
     h('p.muted.small', 'Works offline · No account · No tracking'),
     h('p.muted.small', 'Profiles are for convenience and aren’t private from each other.')));
   return root;
+}
+
+/** "Remind me even when the app is closed" (only when a push server is configured) + Advanced. */
+function pushRows() {
+  const rows = [];
+  if (pushConfigured()) {
+    const on = pushEnabled();
+    const ps = pushStatus();
+    let busy = false;
+    rows.push(row('Remind me even when the app is closed', null, toggle(on, 'Remind me even when the app is closed', async (want) => {
+      if (busy) return;
+      busy = true;
+      if (want) {
+        const r = await enablePush();
+        toast(r.ok ? 'Reminders will arrive even when the app is closed' : r.message, { duration: r.ok ? 4500 : 7000, force: true });
+      } else {
+        await disablePush();
+        toast('Closed-app reminders are off. Reminders appear while the app is open.', { force: true });
+      }
+      busy = false;
+      ctx.rerender();
+    })));
+    rows.push(h(`p.set-desc.pad.push-status.${ps.kind}`, { role: 'status', 'aria-live': 'polite' }, ps.text));
+    if (on) {
+      rows.push(row('Hide reminder text', 'Notifications say “You have a reminder” – no task or habit names are sent to your server or shown on the lock screen.',
+        toggle(hideTextOn(), 'Hide reminder text', (v) => { setHideText(v); ctx.rerender(); })));
+    }
+  }
+  const cfg = pushConfig();
+  const url = h('input.input', { type: 'url', value: cfg.serverUrl, placeholder: 'https://daily-tracker-push.you.workers.dev', 'aria-label': 'Push server URL', autocomplete: 'off', spellcheck: false });
+  const key = h('input.input', { type: 'text', value: cfg.publicKey, placeholder: 'VAPID public key', 'aria-label': 'VAPID public key', autocomplete: 'off', spellcheck: false });
+  const err = h('p.form-error', { role: 'alert' });
+  const save = async (clear = false) => {
+    try {
+      const was = pushEnabled();
+      const next = clear ? { serverUrl: '', publicKey: '' } : { serverUrl: url.value, publicKey: key.value };
+      const cur = pushConfig();
+      if (was && (next.serverUrl.trim().replace(/\/+$/, '') !== cur.serverUrl || next.publicKey.trim() !== cur.publicKey)) await disablePush();
+      setPushConfig(next);
+      toast(clear ? 'Push server cleared' : (pushConfigured() ? (was ? 'Saved. Turn closed-app reminders on again to use the new server.' : 'Saved. You can now turn on closed-app reminders.') : 'Saved'), { force: true });
+      ctx.rerender();
+    } catch (e) { err.textContent = e.message; }
+  };
+  rows.push(h('details.push-advanced', { open: ctx.ui.pushAdvancedOpen || null, ontoggle: (e) => { ctx.ui.pushAdvancedOpen = e.target.open; } },
+    h('summary', 'Advanced: push server'),
+    h('p.set-desc', `Optional. With your own free server (see server/README.md in the app’s code), reminders arrive even when the app is closed. Reminders are planned ${WINDOW_DAYS} days ahead.`),
+    h('label.field-label', 'Server URL'), url,
+    h('label.field-label', 'VAPID public key'), key, err,
+    h('div.set-actions',
+      h('button.btn.secondary.small', { type: 'button', onclick: () => save(false) }, 'Save'),
+      cfg.overridden ? h('button.btn.ghost.small', { type: 'button', onclick: () => save(true) }, 'Clear') : null)));
+  return rows;
 }
 
 function group(title, ...rows) {
@@ -246,4 +300,5 @@ async function resetAll() {
   replaceState(fresh);
   ctx.setDate(todayKey());
   toast(`${name}’s data was reset`);
+  afterDataRemoved(); // turns closed-app reminders off when nothing needs them any more
 }

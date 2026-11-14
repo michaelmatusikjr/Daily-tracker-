@@ -1,0 +1,23 @@
+# Daily Tracker push server. See README.md for the step-by-step deploy guide.
+name = "daily-tracker-push"
+main = "src/index.js"
+compatibility_date = "2026-07-01"
+
+# Send due reminders every minute.
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "daily-tracker-push"
+# Paste the database_id printed by `npx wrangler d1 create daily-tracker-push`:
+database_id = "REPLACE_WITH_YOUR_DATABASE_ID"
+
+[vars]
+# Public key from `npm run gen-vapid` (also paste it into the app's settings).
+VAPID_PUBLIC_KEY = ""
+# A contact address for push services. Replace with your own mailto: or https: URL.
+VAPID_SUBJECT = "mailto:you@example.com"
+# The app's origin(s), comma-separated, no trailing slash, e.g. "https://yourname.github.io"
+ALLOWED_ORIGINS = ""
+# VAPID_PRIVATE_KEY is a secret: `npx wrangler secret put VAPID_PRIVATE_KEY` (never put it here).

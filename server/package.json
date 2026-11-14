@@ -1,0 +1,20 @@
+{
+  "name": "daily-tracker-push",
+  "version": "1.6.0",
+  "private": true,
+  "type": "module",
+  "description": "Web Push reminder server for Daily Tracker (Cloudflare Worker + D1)",
+  "scripts": {
+    "gen-vapid": "node scripts/gen-vapid.mjs",
+    "db:init": "wrangler d1 execute daily-tracker-push --remote --file=schema.sql",
+    "db:init:local": "wrangler d1 execute daily-tracker-push --local --file=schema.sql",
+    "dev": "wrangler dev --test-scheduled",
+    "deploy": "wrangler deploy",
+    "test": "node --test test/"
+  },
+  "devDependencies": {
+    "miniflare": "4.20260730.0",
+    "web-push": "3.6.7",
+    "wrangler": "4.151.3"
+  }
+}

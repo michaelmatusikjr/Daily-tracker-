@@ -15,6 +15,7 @@ import { openQuickAdd, openHabitForm } from './forms.js';
 import { showOnboarding } from './onboarding.js';
 import { registerSW, onInstallChange, safeReload } from './pwa.js';
 import { reschedule } from './notify.js';
+import { initPush, scheduleSync, onPushChange } from './push.js';
 import { renderWorkouts, renderExercise } from './views/workouts.js';
 import { openWorkoutForm } from './workoutForm.js';
 import { openProfileEditor } from './profiles.js';
@@ -54,7 +55,13 @@ function buildNav() {
 }
 
 function render() {
-  const { name, arg } = parseRoute();
+  let { name, arg } = parseRoute();
+  // "#today/2026-11-20" (from a reminder notification) opens that day, then the URL tidies up.
+  if (name === 'today' && arg && /^\d{4}-\d{2}-\d{2}$/.test(arg)) {
+    ctx.ui.date = arg;
+    try { history.replaceState(null, '', '#today'); } catch { /* ignore */ }
+    arg = null;
+  }
   const routeKey = name + '/' + (arg || '');
   const changedRoute = routeKey !== lastRoute;
   // Remember which control had focus so keyboard users keep their place.
@@ -178,6 +185,7 @@ function init() {
     render();
     clearTimeout(scheduleTimer);
     scheduleTimer = setTimeout(reschedule, 300);
+    scheduleSync(); // push server copy (debounced; no-op unless push is on)
   });
   window.addEventListener('hashchange', () => { closeAllSheets(); render(); });
   // Keyboard shortcut: "n" opens quick add.
@@ -244,11 +252,17 @@ function init() {
   // When another tab activates a new version, reload so we never run old code against new data.
   navigator.serviceWorker?.addEventListener?.('message', (e) => {
     if (e.data?.type === 'APP_UPDATED' && e.data.version && e.data.version !== APP_VERSION_STR) safeReload(e.data.version);
+    // A tapped reminder notification: show its day in this window.
+    if (e.data?.type === 'OPEN_URL' && typeof e.data.url === 'string') {
+      try { const u = new URL(e.data.url, location.href); if (u.origin === location.origin && u.hash) { closeAllSheets(); location.hash = u.hash; } } catch { /* ignore */ }
+    }
   });
+  onPushChange(() => { if (parseRoute().name === 'settings' && !isSheetOpen()) render(); });
   if (!getState().settings.onboarded) showOnboarding();
   else if (getActiveProfile()?.introPending) setTimeout(() => openProfileEditor(getActiveProfile(), { intro: true, onDone: () => offerLegacyMerge() }), 400);
   else setTimeout(() => offerLegacyMerge(), 500);
   registerSW();
+  initPush();
 }
 
 init();

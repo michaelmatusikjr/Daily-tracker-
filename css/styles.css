@@ -1178,3 +1178,15 @@ input[type="date"].input, input[type="time"].input { min-width: 0; }
 .sheet-root.pop .sheet-body { padding: 4px 12px 8px; }
 .sheet-root.pop .menu-item { min-height: 40px; font-size: 15px; }
 .detail-hero .minus-btn { margin-left: auto; }
+
+/* ---------- 1.6.0: closed-app reminders (push) ---------- */
+.push-status { margin: 0; padding: 4px 0 12px; }
+.push-status.on { color: var(--success); }
+.push-status.error { color: var(--danger); }
+.push-status.offline, .push-status.pending, .push-status.ios { color: var(--warn); }
+.push-advanced { padding: 12px 0 14px; border-top: 1px solid var(--border); display: block; }
+.push-advanced summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text-2); min-height: 32px; display: flex; align-items: center; }
+.push-advanced[open] summary { margin-bottom: 6px; }
+.push-advanced .input { width: 100%; margin-bottom: 10px; font-size: 14px; min-width: 0; }
+.push-advanced .field-label { display: block; margin: 6px 0 4px; }
+.push-advanced .set-desc { display: block; margin-bottom: 6px; }
