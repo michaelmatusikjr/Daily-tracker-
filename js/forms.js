@@ -350,7 +350,11 @@ export function openTaskForm(task, defaults = {}) {
       priority, category: category === '__new' ? (pendingCat ? ensureCategory(pendingCat) : null) : category,
       recur: { type: recur.type, days: recur.days, interval: Math.max(2, Math.min(365, parseInt(intervalInput.value, 10) || 2)) },
     };
-    if (!isNew) data.id = task.id;
+    if (!isNew) {
+      // Deleted in another window while this form was open: don't bring it back.
+      if (!getState().tasks.some((x) => x.id === task.id)) { sheet.close(); toast('This task was deleted in another window, so the changes weren’t saved.'); return; }
+      data.id = task.id;
+    }
     if (data.reminder !== null && ['default', 'off'].includes(reminderStatus())) ensureReminderPermission();
     saveTask(data);
     sheet.close();

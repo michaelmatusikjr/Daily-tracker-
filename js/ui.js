@@ -282,10 +282,20 @@ export function onItemMenu(el, open, { delay = 500 } = {}) {
   el.addEventListener('click', (e) => { if (suppress) { suppress = false; e.preventDefault(); e.stopPropagation(); } }, true);
   // After a long-press, cancel the finger-up touchend: that also cancels the click and the emulated
   // mouse events, so nothing under the finger (the item or the menu that just opened) gets activated.
+  // The guard lasts until that finger actually lifts, however long the hold (no timer): a new touch
+  // starting first means the old touchend was lost, so the guard is dropped without blocking it.
   const swallowNextClick = () => {
-    const end = (e) => { e.preventDefault(); document.removeEventListener('touchend', end, true); };
+    const done = () => {
+      document.removeEventListener('touchend', end, true);
+      document.removeEventListener('touchcancel', done, true);
+      document.removeEventListener('touchstart', stale, true);
+      setTimeout(() => { suppress = false; }, 400);
+    };
+    const end = (e) => { if (e.cancelable) e.preventDefault(); done(); };
+    const stale = () => { done(); suppress = false; };
     document.addEventListener('touchend', end, { capture: true, passive: false });
-    setTimeout(() => { document.removeEventListener('touchend', end, true); suppress = false; }, 3000);
+    document.addEventListener('touchcancel', done, true);
+    document.addEventListener('touchstart', stale, true);
   };
 }
 
